@@ -15,7 +15,8 @@ import type {
 } from "@/lib/types";
 import { seedProducts, seedCategories, seedReviewsFor } from "@/server/seed";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const IS_SERVERLESS = !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.VERCEL;
+const DATA_DIR = IS_SERVERLESS ? path.join("/tmp", "data") : path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "nova.db");
 
 let db: DatabaseSync | null = null;
