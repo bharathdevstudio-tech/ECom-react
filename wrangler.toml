@@ -1,13 +1,8 @@
 # Cloudflare Workers deployment configuration for Nova Store.
 #
 # The app stores its data in Cloudflare D1 (SQLite) through the `DB` binding.
-# Create the database once, then paste the printed id below:
-#
-#   npx wrangler d1 create nova-store
-#
-# Deploy with:
-#
-#   npm run deploy
+# Cloudflare's Git-integrated builds run `npm run build && npx wrangler deploy`
+# on every push, so a push to `master` is all that is needed to release.
 #
 # `main` and `[assets]` are managed by the Cloudflare Vite plugin
 # (see vite.config.ts / workers/app.ts), so they are intentionally absent here.
@@ -25,8 +20,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "nova-store"
-# Replace with the id printed by: npx wrangler d1 create nova-store
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "fb3f0902-8740-4f4e-a9d3-dd00d3e49841"
 
 [observability]
 enabled = true
