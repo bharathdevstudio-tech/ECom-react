@@ -11,7 +11,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (setCookie) headers.set("Set-Cookie", setCookie);
 
   if (request.method === "DELETE") {
-    const items = db.removeCartItem(sessionId, productId);
+    const items = await db.removeCartItem(sessionId, productId);
     return Response.json(items, { headers });
   }
 
@@ -30,7 +30,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       return Response.json({ error: "quantity must be a non-negative integer" }, { status: 400, headers });
     }
 
-    const items = db.setCartItem(sessionId, productId, quantity);
+    const items = await db.setCartItem(sessionId, productId, quantity);
     return Response.json(items, { headers });
   }
 

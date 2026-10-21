@@ -7,7 +7,7 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   const sessionId = await getSessionId(request);
-  db.clearSessionUser(sessionId);
+  await db.clearSessionUser(sessionId);
   // Expire the session cookie in the browser
   return Response.json(
     { ok: true },

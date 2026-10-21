@@ -19,6 +19,16 @@
 
 # production
 /build
+/dist
+
+# cloudflare
+/.wrangler
+
+# react-router generated types
+/.react-router
+
+# cloudflare generated types
+/worker-configuration.d.ts
 
 # misc
 .DS_Store

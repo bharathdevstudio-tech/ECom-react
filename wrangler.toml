@@ -1,0 +1,32 @@
+# Cloudflare Workers deployment configuration for Nova Store.
+#
+# The app stores its data in Cloudflare D1 (SQLite) through the `DB` binding.
+# Create the database once, then paste the printed id below:
+#
+#   npx wrangler d1 create nova-store
+#
+# Deploy with:
+#
+#   npm run deploy
+#
+# `main` and `[assets]` are managed by the Cloudflare Vite plugin
+# (see vite.config.ts / workers/app.ts), so they are intentionally absent here.
+
+name = "ecom-react"
+main = "./workers/app.ts"
+compatibility_date = "2026-08-04"
+compatibility_flags = ["nodejs_compat"]
+
+# The catalog (~1000 products + reviews) seeds itself automatically on first
+# request. Seeding is resumable, so the free plan's per-invocation query limit
+# is respected: the first few page loads return a partially-seeded catalog and
+# fill in the rest as you browse. No manual migration step is required.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nova-store"
+# Replace with the id printed by: npx wrangler d1 create nova-store
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[observability]
+enabled = true

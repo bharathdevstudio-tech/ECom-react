@@ -7,7 +7,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   const { sessionId, setCookie } = await getOrCreateSession(request);
   const headers = new Headers();
   if (setCookie) headers.set("Set-Cookie", setCookie);
-  const added = db.toggleWishlist(sessionId, params.productId);
-  const ids = db.getWishlistIds(sessionId);
+  const added = await db.toggleWishlist(sessionId, params.productId);
+  const ids = await db.getWishlistIds(sessionId);
   return Response.json({ ids, added }, { headers });
 }

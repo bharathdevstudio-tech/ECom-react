@@ -15,12 +15,12 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Email and password required" }, { status: 400, headers });
   }
 
-  const user = db.verifyPassword(body.email, body.password);
+  const user = await db.verifyPassword(body.email, body.password);
   if (!user) {
     return Response.json({ error: "Invalid email or password" }, { status: 401, headers });
   }
 
-  db.createSession(sessionId, user.id);
-  db.linkSessionToUser(sessionId, user.id);
+  await db.createSession(sessionId, user.id);
+  await db.linkSessionToUser(sessionId, user.id);
   return Response.json({ ok: true, user }, { headers });
 }

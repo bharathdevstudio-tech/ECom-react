@@ -43,14 +43,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   const q = url.searchParams.get("q") ?? "";
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
 
-  const all = getAllProducts();
+  const all = await getAllProducts();
   const base = category === "all" ? all : all.filter((p) => p.category === category);
   const filtered = searchProducts(base, q, sort);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const safePage = Math.min(page, totalPages);
   const start = (safePage - 1) * PER_PAGE;
   const pageProducts = filtered.slice(start, start + PER_PAGE);
-  const categories = getCategories();
+  const categories = await getCategories();
 
   return { pageProducts, filtered, categories, active: category, sort, q, page: safePage, totalPages, start };
 }

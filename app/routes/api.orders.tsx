@@ -30,11 +30,11 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Cart is empty" }, { status: 400, headers });
   }
 
-  const user = db.getUserFromSession(sessionId);
+  const user = await db.getUserFromSession(sessionId);
 
   try {
     // placeOrder re-fetches all prices from DB, recomputes tax/shipping/total
-    const confirmation = db.placeOrder(sessionId, input, items, 0, 0, user?.id);
+    const confirmation = await db.placeOrder(sessionId, input, items, 0, 0, user?.id);
     return Response.json(confirmation, { headers });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Order failed";

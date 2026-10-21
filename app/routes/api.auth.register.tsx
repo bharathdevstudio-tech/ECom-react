@@ -18,9 +18,9 @@ export async function action({ request }: Route.ActionArgs) {
     if (body.password.length < 6) {
       return Response.json({ error: "Password must be at least 6 characters" }, { status: 400, headers });
     }
-    const user = db.createUser(body.email, body.name, body.password);
-    db.createSession(sessionId, user.id);
-    db.linkSessionToUser(sessionId, user.id);
+    const user = await db.createUser(body.email, body.name, body.password);
+    await db.createSession(sessionId, user.id);
+    await db.linkSessionToUser(sessionId, user.id);
     return Response.json({ ok: true, user }, { headers });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Registration failed";

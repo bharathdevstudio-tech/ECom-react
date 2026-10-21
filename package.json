@@ -7,6 +7,9 @@
     "dev": "react-router dev",
     "build": "react-router build",
     "start": "react-router-serve ./build/server/index.js",
+    "preview": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "cf-typegen": "wrangler types",
     "lint": "eslint",
     "images": "node scripts/generate-images.mjs",
     "catalog": "node scripts/gen-catalog.mjs",
@@ -21,6 +24,7 @@
     "react-router": "^7.6.2"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.64.0",
     "@react-router/dev": "^7.6.2",
     "@tailwindcss/vite": "^4",
     "@types/node": "^24",
@@ -29,7 +33,8 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^6.3.5",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^5.1.4",
+    "wrangler": "^4.151.3"
   },
   "allowScripts": {
     "esbuild@0.25.12": true

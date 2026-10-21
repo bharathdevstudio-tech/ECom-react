@@ -5,7 +5,7 @@ import type { AdminProductInput } from "@/lib/types";
 
 async function requireAdmin(request: Request) {
   const sessionId = await getSessionId(request);
-  const user = db.getUserFromSession(sessionId);
+  const user = await db.getUserFromSession(sessionId);
   if (!user || user.role !== "admin") return null;
   return user;
 }
@@ -19,14 +19,14 @@ export async function action({ request, params }: Route.ActionArgs) {
   const { id } = params;
 
   if (request.method === "DELETE") {
-    const ok = db.adminDeleteProduct(id);
+    const ok = await db.adminDeleteProduct(id);
     if (!ok) return Response.json({ error: "Product not found" }, { status: 404 });
     return Response.json({ ok: true });
   }
 
   if (request.method === "PUT" || request.method === "PATCH") {
     const input = (await request.json()) as Partial<AdminProductInput>;
-    const product = db.adminUpdateProduct(id, input);
+    const product = await db.adminUpdateProduct(id, input);
     if (!product) return Response.json({ error: "Product not found" }, { status: 404 });
     return Response.json({ ok: true, product });
   }

@@ -4,7 +4,7 @@ import * as db from "@/server/db";
 
 async function requireAdmin(request: Request) {
   const sessionId = await getSessionId(request);
-  const user = db.getUserFromSession(sessionId);
+  const user = await db.getUserFromSession(sessionId);
   if (!user || user.role !== "admin") return null;
   return user;
 }
@@ -16,7 +16,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const limit = Number(url.searchParams.get("limit") ?? 100);
   const offset = Number(url.searchParams.get("offset") ?? 0);
-  const orders = db.adminGetAllOrders(limit, offset);
+  const orders = await db.adminGetAllOrders(limit, offset);
   return Response.json({ orders });
 }
 
@@ -28,7 +28,7 @@ export async function action({ request }: Route.ActionArgs) {
   const { id, status } = (await request.json()) as { id: number; status: string };
   const valid = ["confirmed", "processing", "shipped", "delivered", "cancelled"];
   if (!valid.includes(status)) return Response.json({ error: "Invalid status" }, { status: 400 });
-  const ok = db.adminUpdateOrderStatus(id, status);
+  const ok = await db.adminUpdateOrderStatus(id, status);
   if (!ok) return Response.json({ error: "Order not found" }, { status: 404 });
   return Response.json({ ok: true });
 }

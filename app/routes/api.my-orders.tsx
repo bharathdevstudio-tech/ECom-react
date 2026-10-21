@@ -4,8 +4,8 @@ import * as db from "@/server/db";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const sessionId = await getSessionId(request);
-  const user = db.getUserFromSession(sessionId);
+  const user = await db.getUserFromSession(sessionId);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const orders = db.getOrdersByUser(user.id);
+  const orders = await db.getOrdersByUser(user.id);
   return Response.json({ orders });
 }

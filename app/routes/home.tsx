@@ -12,9 +12,9 @@ export function meta(): Route.MetaDescriptors {
 }
 
 export async function loader() {
-  const featured = getFeaturedProducts();
-  const categories = getCategories();
-  const total = getAllProducts().length;
+  const featured = await getFeaturedProducts();
+  const categories = await getCategories();
+  const total = (await getAllProducts()).length;
   return { featured, categories, total };
 }
 

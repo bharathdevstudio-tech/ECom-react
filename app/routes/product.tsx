@@ -62,11 +62,11 @@ const categorySpecs: Record<string, [string, string][]> = {
 };
 
 export async function loader({ params }: Route.LoaderArgs) {
-  const product = getProduct(params.id);
+  const product = await getProduct(params.id);
   if (!product) throw data(null, { status: 404 });
-  const features = getProductFeatures(params.id);
-  const reviews = getReviews(params.id);
-  const related = getAllProducts()
+  const features = await getProductFeatures(params.id);
+  const reviews = await getReviews(params.id);
+  const related = (await getAllProducts())
     .filter((p) => p.category === product.category && p.id !== product.id)
     .slice(0, 4);
   return { product, features, reviews, related };

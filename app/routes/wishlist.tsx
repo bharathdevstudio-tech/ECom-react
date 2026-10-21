@@ -10,7 +10,7 @@ export function meta(): Route.MetaDescriptors {
 }
 
 export async function loader() {
-  const products = getAllProducts();
+  const products = await getAllProducts();
   return { products };
 }
 

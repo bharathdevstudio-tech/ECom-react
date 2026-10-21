@@ -5,7 +5,7 @@ import type { AdminProductInput } from "@/lib/types";
 
 async function requireAdmin(request: Request) {
   const sessionId = await getSessionId(request);
-  const user = db.getUserFromSession(sessionId);
+  const user = await db.getUserFromSession(sessionId);
   if (!user || user.role !== "admin") return null;
   return user;
 }
@@ -14,7 +14,7 @@ async function requireAdmin(request: Request) {
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const products = db.getAllProducts();
+  const products = await db.getAllProducts();
   return Response.json({ products });
 }
 
@@ -32,6 +32,6 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "name, category and price are required" }, { status: 400 });
   }
 
-  const product = db.adminCreateProduct(input);
+  const product = await db.adminCreateProduct(input);
   return Response.json({ ok: true, product }, { status: 201 });
 }
