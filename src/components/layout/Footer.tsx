@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import NewsletterForm from "@/components/layout/NewsletterForm";
 
 const shopLinks = [
   { href: "/products", label: "All products" },
@@ -28,6 +29,8 @@ export default function Footer() {
   return (
     <footer className="border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
       <div className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-14">
+
+        <NewsletterForm />
 
         {/* Main grid — 1 col → 2 col → 4 col */}
         <div className="grid grid-cols-2 gap-8 sm:gap-10 lg:grid-cols-4">

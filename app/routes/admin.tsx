@@ -11,9 +11,12 @@ const navItems = [
   { to: "/admin", label: "Dashboard", icon: "📊", end: true },
   { to: "/admin/products", label: "Products", icon: "📦", end: false },
   { to: "/admin/orders", label: "Orders", icon: "🧾", end: false },
+  { to: "/admin/returns", label: "Returns", icon: "↩️", end: false },
   { to: "/admin/coupons", label: "Coupons", icon: "🎟️", end: false },
   { to: "/admin/customers", label: "Customers", icon: "👥", end: false },
   { to: "/admin/messages", label: "Messages", icon: "💬", end: false },
+  { to: "/admin/questions", label: "Q&A", icon: "❓", end: false },
+  { to: "/admin/subscribers", label: "Subscribers", icon: "✉️", end: false },
 ];
 
 export default function AdminLayout() {
@@ -69,14 +72,14 @@ export default function AdminLayout() {
       </aside>
 
       {/* Mobile nav */}
-      <div className="fixed bottom-0 inset-x-0 z-50 flex border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 md:hidden">
+      <div className="no-scrollbar fixed bottom-0 inset-x-0 z-50 flex overflow-x-auto border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 md:hidden">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.end}
             className={({ isActive }) =>
-              `flex flex-1 flex-col items-center gap-1 py-3 text-[10px] font-medium transition-colors ${
+              `flex min-w-[64px] flex-1 shrink-0 flex-col items-center gap-1 py-3 text-[10px] font-medium transition-colors ${
                 isActive ? "text-violet-600 dark:text-violet-400" : "text-zinc-500 dark:text-zinc-400"
               }`
             }

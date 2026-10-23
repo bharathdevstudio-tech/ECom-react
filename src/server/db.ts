@@ -18,6 +18,12 @@ import type {
   ContactMessage,
   ContactMessageInput,
   AdminCustomer,
+  ProductQuestion,
+  ReturnRequest,
+  ReturnStatus,
+  NewsletterSubscriber,
+  InvoiceOrder,
+  OrderItemRow,
 } from "@/lib/types";
 import { seedProducts, seedCategories, seedReviewsFor } from "@/server/seed";
 
@@ -322,6 +328,32 @@ const SCHEMA_STATEMENTS: string[] = [
     status TEXT NOT NULL DEFAULT 'new',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  `CREATE TABLE IF NOT EXISTS product_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL,
+    user_id TEXT,
+    author TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT,
+    answered_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS return_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'requested',
+    admin_note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
   `CREATE TABLE IF NOT EXISTS inventory_movements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id TEXT NOT NULL,
@@ -359,6 +391,11 @@ const POST_MIGRATION_INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number)`,
   `CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory_movements(product_id)`,
   `CREATE INDEX IF NOT EXISTS idx_addresses_user ON addresses(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_questions_product ON product_questions(product_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_returns_user ON return_requests(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_returns_status ON return_requests(status)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_returns_order ON return_requests(order_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_newsletter_email ON newsletter_subscribers(email)`,
   // Reviews used to be unique on (product_id, author, date). Customer reviews
   // are unique per user instead, while seeded reviews keep their dedupe key.
   `DROP INDEX IF EXISTS idx_reviews_unique`,
@@ -842,6 +879,214 @@ export async function adminDeleteContactMessage(id: number): Promise<boolean> {
   const backend = await getBackend();
   const info = await backend.run("DELETE FROM contact_messages WHERE id = ?", [id]);
   return info.changes > 0;
+}
+
+// ─── Product questions ───────────────────────────────────────────────────────
+export async function getProductQuestions(productId: string): Promise<ProductQuestion[]> {
+  const backend = await getBackend();
+  return backend.all<ProductQuestion>(
+    `SELECT * FROM product_questions
+     WHERE product_id = ? AND answer IS NOT NULL
+     ORDER BY created_at DESC`,
+    [productId],
+  );
+}
+
+export async function askProductQuestion(
+  productId: string,
+  userId: string,
+  author: string,
+  question: string,
+): Promise<ProductQuestion> {
+  const text = question.trim();
+  if (text.length < 10) throw new Error("Ask a question of at least 10 characters");
+  if (text.length > 1000) throw new Error("Question is too long (max 1000 characters)");
+
+  const backend = await getBackend();
+  const info = await backend.run(
+    `INSERT INTO product_questions (product_id, user_id, author, question) VALUES (?, ?, ?, ?)`,
+    [productId, userId, author.trim(), text],
+  );
+  return (await backend.get<ProductQuestion>(
+    "SELECT * FROM product_questions WHERE id = ?",
+    [info.lastInsertRowid],
+  ))!;
+}
+
+export async function adminGetQuestions(): Promise<ProductQuestion[]> {
+  const backend = await getBackend();
+  return backend.all<ProductQuestion>(
+    `SELECT q.*, p.name AS product_name
+     FROM product_questions q LEFT JOIN products p ON p.id = q.product_id
+     ORDER BY (q.answer IS NULL) DESC, q.created_at DESC`,
+  );
+}
+
+export async function adminAnswerQuestion(id: number, answer: string): Promise<boolean> {
+  const text = answer.trim();
+  if (text.length < 3) throw new Error("Write an answer of at least 3 characters");
+  if (text.length > 2000) throw new Error("Answer is too long (max 2000 characters)");
+  const backend = await getBackend();
+  const info = await backend.run(
+    `UPDATE product_questions SET answer = ?, answered_at = datetime('now') WHERE id = ?`,
+    [text, id],
+  );
+  return info.changes > 0;
+}
+
+export async function adminDeleteQuestion(id: number): Promise<boolean> {
+  const backend = await getBackend();
+  const info = await backend.run("DELETE FROM product_questions WHERE id = ?", [id]);
+  return info.changes > 0;
+}
+
+// ─── Returns ─────────────────────────────────────────────────────────────────
+const RETURN_SELECT = `SELECT r.*, o.order_number, o.full_name AS customer_name, o.email AS customer_email
+  FROM return_requests r JOIN orders o ON o.id = r.order_id`;
+
+export async function getReturnsByUser(userId: string): Promise<ReturnRequest[]> {
+  const backend = await getBackend();
+  return backend.all<ReturnRequest>(
+    `${RETURN_SELECT} WHERE r.user_id = ? ORDER BY r.created_at DESC`,
+    [userId],
+  );
+}
+
+export async function requestOrderReturn(
+  userId: string,
+  orderId: number,
+  reason: string,
+  details: string,
+): Promise<ReturnRequest> {
+  const backend = await getBackend();
+  const order = await backend.get<{ id: number; status: string }>(
+    "SELECT id, status FROM orders WHERE id = ? AND user_id = ?",
+    [orderId, userId],
+  );
+  if (!order) throw new Error("Order not found");
+  if (order.status !== "delivered") throw new Error("Only delivered orders can be returned");
+
+  const trimmedReason = reason.trim();
+  const trimmedDetails = details.trim();
+  if (trimmedReason.length < 3) throw new Error("Choose a reason for the return");
+  if (trimmedReason.length > 80) throw new Error("Reason is too long");
+  if (trimmedDetails.length > 1000) throw new Error("Details are too long (max 1000 characters)");
+
+  const existing = await backend.get<{ id: number }>(
+    "SELECT id FROM return_requests WHERE order_id = ?",
+    [orderId],
+  );
+  if (existing) throw new Error("A return request already exists for this order");
+
+  const info = await backend.run(
+    `INSERT INTO return_requests (order_id, user_id, reason, details) VALUES (?, ?, ?, ?)`,
+    [orderId, userId, trimmedReason, trimmedDetails],
+  );
+  return (await backend.get<ReturnRequest>(
+    `${RETURN_SELECT} WHERE r.id = ?`,
+    [info.lastInsertRowid],
+  ))!;
+}
+
+export async function adminGetReturns(): Promise<ReturnRequest[]> {
+  const backend = await getBackend();
+  return backend.all<ReturnRequest>(
+    `${RETURN_SELECT} ORDER BY
+       CASE r.status WHEN 'requested' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
+       r.created_at DESC`,
+  );
+}
+
+export async function adminUpdateReturnStatus(
+  id: number,
+  status: ReturnStatus,
+  note?: string,
+): Promise<ReturnRequest> {
+  const allowed: ReturnStatus[] = ["requested", "approved", "rejected", "completed"];
+  if (!allowed.includes(status)) throw new Error("Invalid return status");
+
+  const backend = await getBackend();
+  const current = await backend.get<{ order_id: number; status: ReturnStatus }>(
+    "SELECT order_id, status FROM return_requests WHERE id = ?",
+    [id],
+  );
+  if (!current) throw new Error("Return request not found");
+
+  const transitions: Record<ReturnStatus, ReturnStatus[]> = {
+    requested: ["approved", "rejected"],
+    approved: ["completed"],
+    rejected: [],
+    completed: [],
+  };
+  if (!transitions[current.status].includes(status)) {
+    throw new Error(`A ${current.status} return cannot be marked ${status}`);
+  }
+
+  const trimmedNote = note?.trim();
+  if (trimmedNote && trimmedNote.length > 500) throw new Error("Note is too long (max 500 characters)");
+
+  await backend.run(
+    `UPDATE return_requests SET status = ?, admin_note = COALESCE(?, admin_note), updated_at = datetime('now')
+     WHERE id = ?`,
+    [status, trimmedNote || null, id],
+  );
+
+  // Restock once the returned items reach the warehouse.
+  if (status === "completed") {
+    await restoreOrderStock(current.order_id, "return");
+  }
+
+  return (await backend.get<ReturnRequest>(`${RETURN_SELECT} WHERE r.id = ?`, [id]))!;
+}
+
+// ─── Newsletter ──────────────────────────────────────────────────────────────
+export async function subscribeNewsletter(email: string): Promise<{ created: boolean }> {
+  const address = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw new Error("Enter a valid email address");
+  if (address.length > 254) throw new Error("Email address is too long");
+
+  const backend = await getBackend();
+  const existing = await backend.get<{ id: number }>(
+    "SELECT id FROM newsletter_subscribers WHERE email = ?",
+    [address],
+  );
+  if (existing) return { created: false };
+
+  await backend.run("INSERT INTO newsletter_subscribers (email) VALUES (?)", [address]);
+  return { created: true };
+}
+
+export async function adminGetSubscribers(): Promise<NewsletterSubscriber[]> {
+  const backend = await getBackend();
+  return backend.all<NewsletterSubscriber>(
+    "SELECT * FROM newsletter_subscribers ORDER BY created_at DESC, id DESC",
+  );
+}
+
+export async function adminDeleteSubscriber(id: number): Promise<boolean> {
+  const backend = await getBackend();
+  const info = await backend.run("DELETE FROM newsletter_subscribers WHERE id = ?", [id]);
+  return info.changes > 0;
+}
+
+// ─── Invoices ────────────────────────────────────────────────────────────────
+export async function getOrderWithItemsForUser(
+  userId: string,
+  orderId: number,
+): Promise<InvoiceOrder | undefined> {
+  const backend = await getBackend();
+  const order = await backend.get<AdminOrderRow>(
+    `SELECT o.*, GROUP_CONCAT(oi.product_name || ' ×' || oi.quantity, ', ') AS items_summary
+     FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.id = ? AND o.user_id = ? GROUP BY o.id`,
+    [orderId, userId],
+  );
+  if (!order) return undefined;
+  const items = await backend.all<OrderItemRow>(
+    "SELECT * FROM order_items WHERE order_id = ? ORDER BY id ASC",
+    [orderId],
+  );
+  return { ...order, items };
 }
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
@@ -1576,7 +1821,7 @@ export async function adminUpdateOrderStatus(id: number, status: string): Promis
   return true;
 }
 
-async function restoreOrderStock(orderId: number): Promise<void> {
+async function restoreOrderStock(orderId: number, reason: "cancel" | "return" = "cancel"): Promise<void> {
   const backend = await getBackend();
   const items = await backend.all<{ product_id: string; quantity: number }>(
     "SELECT product_id, quantity FROM order_items WHERE order_id = ?",
@@ -1589,8 +1834,8 @@ async function restoreOrderStock(orderId: number): Promise<void> {
       item.product_id,
     ]);
     await backend.run(
-      "INSERT INTO inventory_movements (product_id, delta, reason, order_id) VALUES (?, ?, 'cancel', ?)",
-      [item.product_id, item.quantity, orderId],
+      "INSERT INTO inventory_movements (product_id, delta, reason, order_id) VALUES (?, ?, ?, ?)",
+      [item.product_id, item.quantity, reason, orderId],
     );
   }
 }
@@ -1631,6 +1876,9 @@ export async function adminGetStats(): Promise<{
   totalOrders: number;
   totalRevenueCents: number;
   totalUsers: number;
+  pendingReturns: number;
+  unansweredQuestions: number;
+  newsletterSubscribers: number;
   lowStock: Product[];
   recentOrders: AdminOrderRow[];
 }> {
@@ -1639,6 +1887,9 @@ export async function adminGetStats(): Promise<{
   const totalOrders = (await backend.get<{ c: number }>("SELECT COUNT(*) AS c FROM orders"))?.c ?? 0;
   const totalRevenueCents = (await backend.get<{ c: number }>("SELECT COALESCE(SUM(total_cents),0) AS c FROM orders WHERE status <> 'cancelled'"))?.c ?? 0;
   const totalUsers = (await backend.get<{ c: number }>("SELECT COUNT(*) AS c FROM users"))?.c ?? 0;
+  const pendingReturns = (await backend.get<{ c: number }>("SELECT COUNT(*) AS c FROM return_requests WHERE status IN ('requested','approved')"))?.c ?? 0;
+  const unansweredQuestions = (await backend.get<{ c: number }>("SELECT COUNT(*) AS c FROM product_questions WHERE answer IS NULL"))?.c ?? 0;
+  const newsletterSubscribers = (await backend.get<{ c: number }>("SELECT COUNT(*) AS c FROM newsletter_subscribers"))?.c ?? 0;
   const lowStock = (
     await backend.all<ProductRow>(
       "SELECT * FROM products WHERE stock <= 5 ORDER BY stock ASC, name ASC LIMIT 8",
@@ -1649,7 +1900,17 @@ export async function adminGetStats(): Promise<{
      FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id
      GROUP BY o.id ORDER BY o.created_at DESC LIMIT 5`,
   );
-  return { totalProducts, totalOrders, totalRevenueCents, totalUsers, lowStock, recentOrders };
+  return {
+    totalProducts,
+    totalOrders,
+    totalRevenueCents,
+    totalUsers,
+    pendingReturns,
+    unansweredQuestions,
+    newsletterSubscribers,
+    lowStock,
+    recentOrders,
+  };
 }
 
 // ─── Admin customers ─────────────────────────────────────────────────────────
@@ -1682,7 +1943,8 @@ export async function resetDatabase(): Promise<void> {
   const backend = await getBackend();
   const tables = [
     "order_items", "orders", "recently_viewed", "cart_items", "wishlist",
-    "sessions", "reviews", "addresses", "contact_messages", "products", "categories", "meta",
+    "sessions", "reviews", "addresses", "contact_messages", "product_questions",
+    "return_requests", "newsletter_subscribers", "products", "categories", "meta",
   ];
   await backend.batch(tables.map((table) => ({ sql: `DELETE FROM ${table}` })));
   seedDone = false;

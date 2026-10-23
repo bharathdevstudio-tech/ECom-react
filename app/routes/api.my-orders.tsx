@@ -6,6 +6,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   const sessionId = await getSessionId(request);
   const user = await db.getUserFromSession(sessionId);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const orders = await db.getOrdersByUser(user.id);
-  return Response.json({ orders });
+  const [orders, returns] = await Promise.all([
+    db.getOrdersByUser(user.id),
+    db.getReturnsByUser(user.id),
+  ]);
+  return Response.json({ orders, returns });
 }

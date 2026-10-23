@@ -2,9 +2,11 @@ import { Form, Link, data, redirect, useActionData, useNavigation } from "react-
 import type { Route } from "./+types/product";
 import {
   addReview,
+  askProductQuestion,
   getAllProducts,
   getProduct,
   getProductFeatures,
+  getProductQuestions,
   getReviews,
   getUserFromSession,
   getUserReview,
@@ -91,34 +93,65 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const sessionId = await getSessionId(request);
   const user = await getUserFromSession(sessionId);
   const userReview = user ? await getUserReview(params.id, user.id) : undefined;
+  const questions = await getProductQuestions(params.id);
 
-  return { product, features, reviews, related, user, userReview, origin: new URL(request.url).origin };
+  return {
+    product,
+    features,
+    reviews,
+    questions,
+    related,
+    user,
+    userReview,
+    origin: new URL(request.url).origin,
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
   const sessionId = await getSessionId(request);
   const user = await getUserFromSession(sessionId);
-  if (!user) {
-    return { error: "Please sign in to write a review." };
-  }
 
   const form = await request.formData();
+  const intent = form.get("intent") === "question" ? "question" : "review";
+
+  if (!user) {
+    return {
+      intent,
+      error:
+        intent === "question"
+          ? "Please sign in to ask a question."
+          : "Please sign in to write a review.",
+    };
+  }
+
   try {
-    await addReview(params.id, user.id, user.name, {
-      rating: Number(form.get("rating") ?? 0),
-      title: String(form.get("title") ?? ""),
-      body: String(form.get("body") ?? ""),
-    });
+    if (intent === "question") {
+      await askProductQuestion(
+        params.id,
+        user.id,
+        user.name,
+        String(form.get("question") ?? ""),
+      );
+    } else {
+      await addReview(params.id, user.id, user.name, {
+        rating: Number(form.get("rating") ?? 0),
+        title: String(form.get("title") ?? ""),
+        body: String(form.get("body") ?? ""),
+      });
+    }
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not save your review." };
+    return {
+      intent,
+      error: err instanceof Error ? err.message : "Could not save your submission.",
+    };
   }
 
   // Redirect after a successful POST so a refresh cannot resubmit the form.
-  return redirect(`/products/${params.id}#reviews`);
+  return redirect(`/products/${params.id}${intent === "question" ? "#questions" : "#reviews"}`);
 }
 
 export default function ProductPage({ loaderData }: Route.ComponentProps) {
-  const { product, features, reviews, related, user, userReview, origin } = loaderData;
+  const { product, features, reviews, questions, related, user, userReview, origin } = loaderData;
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const submitting = navigation.state === "submitting";
@@ -374,7 +407,7 @@ export default function ProductPage({ loaderData }: Route.ComponentProps) {
               <Form method="post" className="flex flex-col gap-4">
                 <h3 className="font-bold text-zinc-900 dark:text-zinc-50">Write a review</h3>
 
-                {actionData?.error && (
+                {actionData?.error && actionData.intent !== "question" && (
                   <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/50 dark:bg-red-950/40 dark:text-red-400">
                     {actionData.error}
                   </p>
@@ -478,6 +511,98 @@ export default function ProductPage({ loaderData }: Route.ComponentProps) {
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
               No reviews yet — be the first to share your thoughts.
             </p>
+          )}
+        </section>
+
+        {/* ── Questions & answers ─────────────────────────── */}
+        <section id="questions" aria-labelledby="questions-heading" className="mt-16 scroll-mt-24 sm:mt-20">
+          <div className="mb-6">
+            <p className="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">
+              Ask before you buy
+            </p>
+            <h2
+              id="questions-heading"
+              className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50"
+            >
+              Questions &amp; answers
+            </h2>
+          </div>
+
+          <div className="mb-8 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-6">
+            {!user ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                Have a question about this product?{" "}
+                <Link
+                  to={`/login?redirect=${encodeURIComponent(`/products/${product.id}#questions`)}`}
+                  className="font-semibold text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+                >
+                  Sign in
+                </Link>{" "}
+                to ask. We publish answered questions for everyone to see.
+              </p>
+            ) : (
+              <Form method="post" className="flex flex-col gap-3">
+                <input type="hidden" name="intent" value="question" />
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-zinc-600 dark:text-zinc-300">
+                    Your question
+                  </span>
+                  <textarea
+                    name="question"
+                    required
+                    minLength={10}
+                    maxLength={1000}
+                    rows={3}
+                    placeholder="What would you like to know about this product?"
+                    className="w-full resize-y rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:placeholder:text-zinc-500"
+                  />
+                </label>
+                {actionData?.error && actionData.intent === "question" && (
+                  <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/50 dark:bg-red-950/40 dark:text-red-400">
+                    {actionData.error}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="h-11 w-full rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 px-6 text-sm font-semibold text-white shadow-lg shadow-violet-600/20 transition-all hover:shadow-xl disabled:cursor-wait disabled:opacity-60 sm:w-auto sm:self-start"
+                >
+                  {submitting ? "Sending…" : "Ask question"}
+                </button>
+              </Form>
+            )}
+          </div>
+
+          {questions.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-zinc-300 px-5 py-8 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+              No answered questions yet. Be the first to ask!
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {questions.map((item) => (
+                <article
+                  key={item.id}
+                  className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-6"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="font-semibold text-zinc-900 dark:text-zinc-50">
+                      {item.question}
+                    </p>
+                    <span className="shrink-0 text-xs text-zinc-400 dark:text-zinc-500">
+                      {item.author} · {item.created_at.slice(0, 10)}
+                    </span>
+                  </div>
+                  {item.answer && (
+                    <div className="mt-3 rounded-xl bg-violet-50 px-4 py-3 dark:bg-violet-950/30">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">
+                        Nova Store answer
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">{item.answer}</p>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
           )}
         </section>
 

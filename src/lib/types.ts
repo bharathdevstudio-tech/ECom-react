@@ -142,6 +142,44 @@ export type AdminCustomer = {
   last_order_at: string | null;
 };
 
+// ─── Product questions ──────────────────────────────────────────────────────
+export type ProductQuestion = {
+  id: number;
+  product_id: string;
+  product_name?: string;
+  user_id: string | null;
+  author: string;
+  question: string;
+  answer: string | null;
+  answered_at: string | null;
+  created_at: string;
+};
+
+// ─── Returns ─────────────────────────────────────────────────────────────────
+export type ReturnStatus = "requested" | "approved" | "rejected" | "completed";
+
+export type ReturnRequest = {
+  id: number;
+  order_id: number;
+  order_number: string;
+  user_id: string;
+  customer_name?: string;
+  customer_email?: string;
+  reason: string;
+  details: string;
+  status: ReturnStatus;
+  admin_note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// ─── Newsletter ──────────────────────────────────────────────────────────────
+export type NewsletterSubscriber = {
+  id: number;
+  email: string;
+  created_at: string;
+};
+
 export type OrderConfirmation = {
   orderNumber: string;
   fullName: string;
@@ -214,4 +252,17 @@ export type AdminOrderRow = {
   status: string;
   created_at: string;
   items_summary: string | null;
+};
+
+export type OrderItemRow = {
+  id: number;
+  order_id: number;
+  product_id: string | null;
+  product_name: string;
+  price_cents: number;
+  quantity: number;
+};
+
+export type InvoiceOrder = AdminOrderRow & {
+  items: OrderItemRow[];
 };

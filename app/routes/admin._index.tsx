@@ -13,6 +13,9 @@ type Stats = {
   totalOrders: number;
   totalRevenueCents: number;
   totalUsers: number;
+  pendingReturns: number;
+  unansweredQuestions: number;
+  newsletterSubscribers: number;
   lowStock: Product[];
   recentOrders: AdminOrderRow[];
 };
@@ -31,7 +34,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetch("/api/admin/stats")
       .then((r) => r.json())
-      .then((d: Stats) => setStats(d));
+      .then((d) => setStats(d as Stats));
   }, []);
 
   const cards = stats
@@ -66,6 +69,42 @@ export default function AdminDashboard() {
               </div>
             ))}
       </div>
+
+      {/* Needs attention */}
+      {stats !== null && (
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <Link
+            to="/admin/returns"
+            className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 transition-colors hover:border-violet-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-violet-700"
+          >
+            <span className="text-xl" aria-hidden="true">↩️</span>
+            <div>
+              <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Pending returns</p>
+              <p className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-zinc-50">{stats.pendingReturns}</p>
+            </div>
+          </Link>
+          <Link
+            to="/admin/questions"
+            className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 transition-colors hover:border-violet-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-violet-700"
+          >
+            <span className="text-xl" aria-hidden="true">❓</span>
+            <div>
+              <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Unanswered questions</p>
+              <p className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-zinc-50">{stats.unansweredQuestions}</p>
+            </div>
+          </Link>
+          <Link
+            to="/admin/subscribers"
+            className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 transition-colors hover:border-violet-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-violet-700"
+          >
+            <span className="text-xl" aria-hidden="true">✉️</span>
+            <div>
+              <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Newsletter subscribers</p>
+              <p className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-zinc-50">{stats.newsletterSubscribers}</p>
+            </div>
+          </Link>
+        </div>
+      )}
 
       {/* Low stock */}
       {stats !== null && stats.lowStock.length > 0 && (

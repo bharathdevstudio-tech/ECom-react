@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router";
 import type { Route } from "./+types/my-orders";
 import { useAuth } from "@/components/auth/AuthContext";
 import { formatPrice } from "@/lib/format";
-import type { AdminOrderRow } from "@/lib/types";
+import type { AdminOrderRow, ReturnRequest, ReturnStatus } from "@/lib/types";
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: "My Orders — Nova Store" }];
@@ -24,6 +24,21 @@ const STEP_LABELS: Record<(typeof STATUS_STEPS)[number], string> = {
   shipped: "Shipped",
   delivered: "Delivered",
 };
+
+const RETURN_STATUS_STYLES: Record<ReturnStatus, string> = {
+  requested: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
+  approved: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300",
+  completed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
+  rejected: "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300",
+};
+
+const RETURN_REASONS = [
+  "Damaged or defective",
+  "Wrong item received",
+  "Item not as described",
+  "Changed my mind",
+  "Other",
+];
 
 function OrderTimeline({ status }: { status: string }) {
   if (status === "cancelled") {
@@ -78,8 +93,13 @@ export default function MyOrdersPage() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
+  const [returns, setReturns] = useState<ReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState<number | null>(null);
+  const [returnOpen, setReturnOpen] = useState<number | null>(null);
+  const [returnReason, setReturnReason] = useState(RETURN_REASONS[0]);
+  const [returnDetails, setReturnDetails] = useState("");
+  const [returning, setReturning] = useState<number | null>(null);
   const [notice, setNotice] = useState<{ orderId: number; type: "ok" | "error"; message: string } | null>(null);
 
   useEffect(() => {
@@ -87,7 +107,11 @@ export default function MyOrdersPage() {
     if (!user) { navigate("/login?redirect=/my-orders", { replace: true }); return; }
     fetch("/api/my-orders")
       .then((r) => r.json())
-      .then((d: { orders: AdminOrderRow[] }) => setOrders(d.orders ?? []))
+      .then((d) => {
+        const data = d as { orders: AdminOrderRow[]; returns?: ReturnRequest[] };
+        setOrders(data.orders ?? []);
+        setReturns(data.returns ?? []);
+      })
       .finally(() => setLoading(false));
   }, [user, authLoading, navigate]);
 
@@ -113,6 +137,45 @@ export default function MyOrdersPage() {
       setNotice({ orderId: order.id, type: "error", message: "Network error. Try again." });
     } finally {
       setCancelling(null);
+    }
+  }
+
+  async function requestReturn(order: AdminOrderRow) {
+    if (returning !== null) return;
+    setNotice(null);
+    setReturning(order.id);
+    try {
+      const res = await fetch(`/api/my-orders/${order.id}/return`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: returnReason, details: returnDetails }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        returnRequest?: ReturnRequest;
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.returnRequest) {
+        setNotice({
+          orderId: order.id,
+          type: "error",
+          message: data.error ?? "Could not request a return.",
+        });
+        return;
+      }
+      setReturns((prev) => [data.returnRequest!, ...prev]);
+      setReturnOpen(null);
+      setReturnDetails("");
+      setReturnReason(RETURN_REASONS[0]);
+      setNotice({
+        orderId: order.id,
+        type: "ok",
+        message: "Return requested. We'll review it within 2 business days.",
+      });
+    } catch {
+      setNotice({ orderId: order.id, type: "error", message: "Network error. Try again." });
+    } finally {
+      setReturning(null);
     }
   }
 
@@ -157,6 +220,7 @@ export default function MyOrdersPage() {
         <div className="flex flex-col gap-4">
           {orders.map((order) => {
             const canCancel = order.status === "confirmed" || order.status === "processing";
+            const existingReturn = returns.find((item) => item.order_id === order.id);
             return (
               <div key={order.id} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -174,6 +238,85 @@ export default function MyOrdersPage() {
 
                 <OrderTimeline status={order.status} />
 
+                {existingReturn && (
+                  <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950/40">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                        Return request · {existingReturn.reason}
+                      </p>
+                      <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${RETURN_STATUS_STYLES[existingReturn.status]}`}>
+                        {existingReturn.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Requested {existingReturn.created_at.slice(0, 10)}
+                      {existingReturn.status === "completed" && " · Items returned to stock"}
+                    </p>
+                    {existingReturn.admin_note && (
+                      <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
+                        Store note: {existingReturn.admin_note}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {returnOpen === order.id && !existingReturn && (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      requestReturn(order);
+                    }}
+                    className="mt-4 rounded-xl border border-violet-200 bg-violet-50/60 p-4 dark:border-violet-800/50 dark:bg-violet-950/20"
+                  >
+                    <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Request a return</p>
+                    <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      Tell us what went wrong. We review requests within 2 business days.
+                    </p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                        Reason
+                        <select
+                          value={returnReason}
+                          onChange={(event) => setReturnReason(event.target.value)}
+                          className="mt-1 h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                        >
+                          {RETURN_REASONS.map((reason) => (
+                            <option key={reason} value={reason}>{reason}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300 sm:col-span-2">
+                        Details (optional)
+                        <textarea
+                          value={returnDetails}
+                          onChange={(event) => setReturnDetails(event.target.value)}
+                          maxLength={1000}
+                          rows={3}
+                          placeholder="Add order or item details to help us process your return."
+                          className="mt-1 w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:placeholder:text-zinc-500"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="submit"
+                        disabled={returning === order.id}
+                        className="rounded-full bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {returning === order.id ? "Sending…" : "Submit return request"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReturnOpen(null)}
+                        disabled={returning === order.id}
+                        className="rounded-full border border-zinc-300 px-4 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-white disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
+
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
                   <div className="flex gap-4 text-sm">
                     <span className="text-zinc-500 dark:text-zinc-400">Subtotal <span className="font-semibold text-zinc-900 dark:text-zinc-50">{formatPrice(order.subtotal_cents / 100)}</span></span>
@@ -181,6 +324,26 @@ export default function MyOrdersPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <p className="text-xs text-zinc-400 dark:text-zinc-500">{order.city}, {order.zip}</p>
+                    <Link
+                      to={`/my-orders/${order.id}/invoice`}
+                      className="rounded-full border border-zinc-300 px-4 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Invoice
+                    </Link>
+                    {order.status === "delivered" && !existingReturn && returnOpen !== order.id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNotice(null);
+                          setReturnReason(RETURN_REASONS[0]);
+                          setReturnDetails("");
+                          setReturnOpen(order.id);
+                        }}
+                        className="rounded-full border border-violet-200 px-4 py-1.5 text-xs font-semibold text-violet-600 transition-colors hover:bg-violet-50 dark:border-violet-800/60 dark:text-violet-400 dark:hover:bg-violet-950/30"
+                      >
+                        Request return
+                      </button>
+                    )}
                     {canCancel && (
                       <button
                         type="button"

@@ -98,3 +98,26 @@ body {
 /* ── Hide scrollbar ─────────────────────────────────── */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Printable invoice ──────────────────────────────── */
+@media print {
+  body > header,
+  body > footer {
+    display: none !important;
+  }
+
+  body {
+    background: #fff !important;
+    color: #18181b !important;
+  }
+
+  main {
+    display: block !important;
+  }
+
+  .invoice-sheet {
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+}
