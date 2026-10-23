@@ -103,9 +103,10 @@ export default function OrderLookupPage() {
         </label>
 
         {error && (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/50 dark:bg-red-950/40 dark:text-red-400">
-            {error}
-          </p>
+          <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-950/50 dark:text-red-400">
+            <span className="mt-0.5 shrink-0 text-base" aria-hidden="true">⚠️</span>
+            <p className="font-medium leading-relaxed">{error}</p>
+          </div>
         )}
 
         <button
