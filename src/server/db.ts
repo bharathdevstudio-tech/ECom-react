@@ -367,7 +367,7 @@ const REVIEW_COLUMNS = 7;
 const REVIEWS_PER_STATEMENT = 14; // 14 × 7 = 98 params
 const SEED_STATEMENTS_PER_REQUEST = 30;
 const SEED_THROTTLE_MS = 250;
-const SEED_CURSOR_KEY = "seed_cursor";
+const SEED_CURSOR_KEY = "seed_cursor_v2_catalog";
 
 // Per-isolate seeding progress. `seedDone` avoids touching the meta table on
 // every query once the catalog has been seeded.
@@ -387,9 +387,17 @@ function placeholders(rows: number, columns: number): string {
 async function buildSeedStatements(): Promise<{ sql: string; params: SqlParam[] }[]> {
   const statements: { sql: string; params: SqlParam[] }[] = [];
 
-  // The admin account goes FIRST. Seeding is sliced across requests, so if the
-  // catalog was written ahead of it a fresh deployment would not accept the
-  // documented admin login until ~1000 products had been inserted.
+  // Fresh catalog load: clear existing catalog data so the new Flipkart-style
+  // products replace everything that was previously seeded.
+  statements.push({ sql: "DELETE FROM recently_viewed", params: [] });
+  statements.push({ sql: "DELETE FROM wishlist", params: [] });
+  statements.push({ sql: "DELETE FROM cart_items", params: [] });
+  statements.push({ sql: "DELETE FROM inventory_movements", params: [] });
+  statements.push({ sql: "DELETE FROM reviews", params: [] });
+  statements.push({ sql: "DELETE FROM products", params: [] });
+  statements.push({ sql: "DELETE FROM categories", params: [] });
+
+  // The admin account goes FIRST.
   const salt = generateSalt();
   const hash = await hashPassword("admin123", salt);
   statements.push({
