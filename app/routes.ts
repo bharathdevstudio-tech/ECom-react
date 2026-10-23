@@ -14,6 +14,7 @@ export default [
   route("login", "routes/login.tsx"),
   route("register", "routes/register.tsx"),
   route("my-orders", "routes/my-orders.tsx"),
+  route("profile", "routes/profile.tsx"),
   route("order-lookup", "routes/order-lookup.tsx"),
 
   // Admin (layout + nested)
@@ -35,6 +36,8 @@ export default [
   route("api/orders/lookup", "routes/api.orders.lookup.tsx"),
   route("api/coupons/validate", "routes/api.coupons.validate.tsx"),
   route("api/my-orders", "routes/api.my-orders.tsx"),
+  route("api/profile", "routes/api.profile.tsx"),
+  route("api/profile/password", "routes/api.profile.password.tsx"),
 
   // Auth API
   route("api/auth/register", "routes/api.auth.register.tsx"),

@@ -174,6 +174,9 @@ export default function Header() {
                       )}
                     </div>
                     <hr className="my-1 border-zinc-100 dark:border-zinc-800" />
+                    <Link to="/profile" className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800">
+                      <span aria-hidden="true">👤</span> My profile
+                    </Link>
                     <Link to="/my-orders" className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800">
                       <span aria-hidden="true">📦</span> My orders
                     </Link>
@@ -266,6 +269,9 @@ export default function Header() {
                   <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{user.name}</p>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400">{user.email}</p>
                 </div>
+                <Link to="/profile" onClick={() => setMenuOpen(false)} className="flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800">
+                  👤 My profile
+                </Link>
                 <Link to="/my-orders" onClick={() => setMenuOpen(false)} className="flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800">
                   📦 My orders
                 </Link>

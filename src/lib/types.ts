@@ -104,6 +104,15 @@ export type AuthResult =
   | { ok: true; user: User }
   | { ok: false; error: string };
 
+export type UserProfile = User & {
+  createdAt: string;
+  stats: {
+    orders: number;
+    totalSpentCents: number;
+    reviews: number;
+  };
+};
+
 // ─── Admin ────────────────────────────────────────────────────────────────────
 export type AdminProductInput = {
   name: string;

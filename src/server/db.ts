@@ -12,6 +12,7 @@ import type {
   Coupon,
   CouponInput,
   CouponType,
+  UserProfile,
 } from "@/lib/types";
 import { seedProducts, seedCategories, seedReviewsFor } from "@/server/seed";
 
@@ -518,6 +519,85 @@ export async function verifyPassword(email: string, password: string): Promise<U
   const hash = await hashPassword(password, row.salt);
   if (hash !== row.password_hash) return null;
   return { id: row.id, email: row.email, name: row.name, role: row.role as "admin" | "customer" };
+}
+
+// ─── Customer profile ────────────────────────────────────────────────────────
+export async function getUserProfile(userId: string): Promise<UserProfile | undefined> {
+  const backend = await getBackend();
+  const row = await backend.get<{
+    id: string; email: string; name: string; role: string; created_at: string;
+  }>("SELECT id, email, name, role, created_at FROM users WHERE id = ?", [userId]);
+  if (!row) return undefined;
+
+  const orderStats = await backend.get<{ count: number; total: number }>(
+    "SELECT COUNT(*) AS count, COALESCE(SUM(total_cents), 0) AS total FROM orders WHERE user_id = ?",
+    [userId],
+  );
+  const reviewStats = await backend.get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM reviews WHERE user_id = ?",
+    [userId],
+  );
+
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role as "admin" | "customer",
+    // SQLite stores UTC as "YYYY-MM-DD HH:MM:SS"; make it an unambiguous ISO string.
+    createdAt: row.created_at.includes("T")
+      ? row.created_at
+      : `${row.created_at.replace(" ", "T")}Z`,
+    stats: {
+      orders: Number(orderStats?.count ?? 0),
+      totalSpentCents: Number(orderStats?.total ?? 0),
+      reviews: Number(reviewStats?.count ?? 0),
+    },
+  };
+}
+
+export async function updateUserProfile(
+  userId: string,
+  input: { name?: string; email?: string },
+): Promise<User> {
+  const backend = await getBackend();
+  const current = await getUserById(userId);
+  if (!current) throw new Error("Account not found");
+
+  const name = (input.name ?? current.name).trim();
+  const email = (input.email ?? current.email).toLowerCase().trim();
+
+  if (!name) throw new Error("Name is required");
+  if (name.length > 80) throw new Error("Name is too long (max 80 characters)");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Invalid email address");
+
+  const existing = await getUserByEmail(email);
+  if (existing && existing.id !== userId) throw new Error("That email is already in use");
+
+  await backend.run("UPDATE users SET name = ?, email = ? WHERE id = ?", [name, email, userId]);
+  return (await getUserById(userId))!;
+}
+
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const backend = await getBackend();
+  const row = await backend.get<UserRow>("SELECT * FROM users WHERE id = ?", [userId]);
+  if (!row) throw new Error("Account not found");
+
+  const currentHash = await hashPassword(currentPassword ?? "", row.salt);
+  if (currentHash !== row.password_hash) throw new Error("Current password is incorrect");
+  if (!newPassword || newPassword.length < 8) {
+    throw new Error("New password must be at least 8 characters");
+  }
+  if (newPassword === currentPassword) {
+    throw new Error("New password must be different from the current one");
+  }
+
+  const salt = generateSalt();
+  const hash = await hashPassword(newPassword, salt);
+  await backend.run("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", [hash, salt, userId]);
 }
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
