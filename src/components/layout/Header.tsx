@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { useCart } from "@/components/cart/CartContext";
 import { useWishlist } from "@/components/wishlist/WishlistContext";
 import { useAuth } from "@/components/auth/AuthContext";
@@ -11,15 +11,29 @@ const navLinks = [
 
 export default function Header() {
   const location = useLocation();
+  const navigate = useNavigate();
   const pathname = location.pathname;
   const { count } = useCart();
   const { count: wishlistCount } = useWishlist();
   const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const drawerRef = useRef<HTMLDivElement>(null);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Keep the header search in sync with the shop URL.
+  useEffect(() => {
+    setSearchQuery(new URLSearchParams(location.search).get("q") ?? "");
+  }, [location.search]);
+
+  function submitSearch(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    setMenuOpen(false);
+    navigate(q ? `/products?q=${encodeURIComponent(q)}` : "/products");
+  }
 
   // Close on route change
   useEffect(() => { setMenuOpen(false); setUserOpen(false); }, [pathname]);
@@ -104,6 +118,31 @@ export default function Header() {
             </Link>
           )}
         </nav>
+
+        {/* Desktop search */}
+        <form
+          onSubmit={submitSearch}
+          role="search"
+          className="relative ml-3 hidden min-w-0 max-w-xs flex-1 md:block"
+        >
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search gadgets…"
+            aria-label="Search products"
+            className="h-10 w-full rounded-full border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500 dark:focus:bg-zinc-950"
+          />
+          <button
+            type="submit"
+            aria-label="Search"
+            className="absolute left-0 top-0 flex h-10 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors hover:text-violet-600 dark:hover:text-violet-400"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+          </button>
+        </form>
 
         {/* Right actions */}
         <div className="flex items-center gap-1">
@@ -238,6 +277,26 @@ export default function Header() {
           role="navigation"
           aria-label="Mobile navigation"
         >
+          <form onSubmit={submitSearch} role="search" className="relative mb-3">
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search products…"
+              aria-label="Search products"
+              className="h-11 w-full rounded-full border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500"
+            />
+            <button
+              type="submit"
+              aria-label="Search"
+              className="absolute left-0 top-0 flex h-11 w-10 items-center justify-center rounded-full text-zinc-400"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+              </svg>
+            </button>
+          </form>
+
           <nav className="flex flex-col gap-1">
             {navLinks.map((link) => {
               const active = link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);

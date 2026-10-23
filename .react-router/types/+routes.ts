@@ -34,6 +34,12 @@ type Pages = {
   "/wishlist": {
     params: {};
   };
+  "/sitemap.xml": {
+    params: {};
+  };
+  "/robots.txt": {
+    params: {};
+  };
   "/login": {
     params: {};
   };
@@ -43,8 +49,16 @@ type Pages = {
   "/my-orders": {
     params: {};
   };
+  "/profile": {
+    params: {};
+  };
   "/order-lookup": {
     params: {};
+  };
+  "/:slug": {
+    params: {
+      "slug": string;
+    };
   };
   "/admin": {
     params: {};
@@ -55,7 +69,13 @@ type Pages = {
   "/admin/orders": {
     params: {};
   };
+  "/admin/customers": {
+    params: {};
+  };
   "/admin/coupons": {
+    params: {};
+  };
+  "/admin/messages": {
     params: {};
   };
   "/api/cart": {
@@ -91,7 +111,29 @@ type Pages = {
   "/api/coupons/validate": {
     params: {};
   };
+  "/api/contact": {
+    params: {};
+  };
   "/api/my-orders": {
+    params: {};
+  };
+  "/api/my-orders/:id/cancel": {
+    params: {
+      "id": string;
+    };
+  };
+  "/api/addresses": {
+    params: {};
+  };
+  "/api/addresses/:id": {
+    params: {
+      "id": string;
+    };
+  };
+  "/api/profile": {
+    params: {};
+  };
+  "/api/profile/password": {
     params: {};
   };
   "/api/auth/register": {
@@ -123,6 +165,9 @@ type Pages = {
   "/api/admin/coupons": {
     params: {};
   };
+  "/api/admin/messages": {
+    params: {};
+  };
   "/*": {
     params: {
       "*": string;
@@ -133,7 +178,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/products" | "/products/:id" | "/cart" | "/checkout" | "/order-confirmation" | "/wishlist" | "/login" | "/register" | "/my-orders" | "/order-lookup" | "/admin" | "/admin/products" | "/admin/orders" | "/admin/coupons" | "/api/cart" | "/api/cart/:productId" | "/api/wishlist" | "/api/wishlist/:productId" | "/api/recent-views" | "/api/recent-views/:productId" | "/api/orders" | "/api/orders/lookup" | "/api/coupons/validate" | "/api/my-orders" | "/api/auth/register" | "/api/auth/login" | "/api/auth/logout" | "/api/auth/me" | "/api/admin/stats" | "/api/admin/products" | "/api/admin/products/:id" | "/api/admin/orders" | "/api/admin/coupons" | "/*";
+    page: "/" | "/products" | "/products/:id" | "/cart" | "/checkout" | "/order-confirmation" | "/wishlist" | "/sitemap.xml" | "/robots.txt" | "/login" | "/register" | "/my-orders" | "/profile" | "/order-lookup" | "/:slug" | "/admin" | "/admin/products" | "/admin/orders" | "/admin/customers" | "/admin/coupons" | "/admin/messages" | "/api/cart" | "/api/cart/:productId" | "/api/wishlist" | "/api/wishlist/:productId" | "/api/recent-views" | "/api/recent-views/:productId" | "/api/orders" | "/api/orders/lookup" | "/api/coupons/validate" | "/api/contact" | "/api/my-orders" | "/api/my-orders/:id/cancel" | "/api/addresses" | "/api/addresses/:id" | "/api/profile" | "/api/profile/password" | "/api/auth/register" | "/api/auth/login" | "/api/auth/logout" | "/api/auth/me" | "/api/admin/stats" | "/api/admin/products" | "/api/admin/products/:id" | "/api/admin/orders" | "/api/admin/coupons" | "/api/admin/messages" | "/*";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -163,6 +208,14 @@ type RouteFiles = {
     id: "routes/wishlist";
     page: "/wishlist";
   };
+  "routes/sitemap.tsx": {
+    id: "routes/sitemap";
+    page: "/sitemap.xml";
+  };
+  "routes/robots.tsx": {
+    id: "routes/robots";
+    page: "/robots.txt";
+  };
   "routes/login.tsx": {
     id: "routes/login";
     page: "/login";
@@ -175,13 +228,21 @@ type RouteFiles = {
     id: "routes/my-orders";
     page: "/my-orders";
   };
+  "routes/profile.tsx": {
+    id: "routes/profile";
+    page: "/profile";
+  };
   "routes/order-lookup.tsx": {
     id: "routes/order-lookup";
     page: "/order-lookup";
   };
+  "routes/pages.$slug.tsx": {
+    id: "routes/pages.$slug";
+    page: "/:slug";
+  };
   "routes/admin.tsx": {
     id: "routes/admin";
-    page: "/admin" | "/admin/products" | "/admin/orders" | "/admin/coupons";
+    page: "/admin" | "/admin/products" | "/admin/orders" | "/admin/customers" | "/admin/coupons" | "/admin/messages";
   };
   "routes/admin._index.tsx": {
     id: "routes/admin._index";
@@ -195,9 +256,17 @@ type RouteFiles = {
     id: "routes/admin.orders";
     page: "/admin/orders";
   };
+  "routes/admin.customers.tsx": {
+    id: "routes/admin.customers";
+    page: "/admin/customers";
+  };
   "routes/admin.coupons.tsx": {
     id: "routes/admin.coupons";
     page: "/admin/coupons";
+  };
+  "routes/admin.messages.tsx": {
+    id: "routes/admin.messages";
+    page: "/admin/messages";
   };
   "routes/api.cart.tsx": {
     id: "routes/api.cart";
@@ -235,9 +304,33 @@ type RouteFiles = {
     id: "routes/api.coupons.validate";
     page: "/api/coupons/validate";
   };
+  "routes/api.contact.tsx": {
+    id: "routes/api.contact";
+    page: "/api/contact";
+  };
   "routes/api.my-orders.tsx": {
     id: "routes/api.my-orders";
     page: "/api/my-orders";
+  };
+  "routes/api.my-orders.$id.cancel.tsx": {
+    id: "routes/api.my-orders.$id.cancel";
+    page: "/api/my-orders/:id/cancel";
+  };
+  "routes/api.addresses.tsx": {
+    id: "routes/api.addresses";
+    page: "/api/addresses";
+  };
+  "routes/api.addresses.$id.tsx": {
+    id: "routes/api.addresses.$id";
+    page: "/api/addresses/:id";
+  };
+  "routes/api.profile.tsx": {
+    id: "routes/api.profile";
+    page: "/api/profile";
+  };
+  "routes/api.profile.password.tsx": {
+    id: "routes/api.profile.password";
+    page: "/api/profile/password";
   };
   "routes/api.auth.register.tsx": {
     id: "routes/api.auth.register";
@@ -275,6 +368,10 @@ type RouteFiles = {
     id: "routes/api.admin.coupons";
     page: "/api/admin/coupons";
   };
+  "routes/api.admin.messages.tsx": {
+    id: "routes/api.admin.messages";
+    page: "/api/admin/messages";
+  };
   "routes/404.tsx": {
     id: "routes/404";
     page: "/*";
@@ -290,15 +387,21 @@ type RouteModules = {
   "routes/checkout": typeof import("./app/routes/checkout.tsx");
   "routes/order-confirmation": typeof import("./app/routes/order-confirmation.tsx");
   "routes/wishlist": typeof import("./app/routes/wishlist.tsx");
+  "routes/sitemap": typeof import("./app/routes/sitemap.tsx");
+  "routes/robots": typeof import("./app/routes/robots.tsx");
   "routes/login": typeof import("./app/routes/login.tsx");
   "routes/register": typeof import("./app/routes/register.tsx");
   "routes/my-orders": typeof import("./app/routes/my-orders.tsx");
+  "routes/profile": typeof import("./app/routes/profile.tsx");
   "routes/order-lookup": typeof import("./app/routes/order-lookup.tsx");
+  "routes/pages.$slug": typeof import("./app/routes/pages.$slug.tsx");
   "routes/admin": typeof import("./app/routes/admin.tsx");
   "routes/admin._index": typeof import("./app/routes/admin._index.tsx");
   "routes/admin.products": typeof import("./app/routes/admin.products.tsx");
   "routes/admin.orders": typeof import("./app/routes/admin.orders.tsx");
+  "routes/admin.customers": typeof import("./app/routes/admin.customers.tsx");
   "routes/admin.coupons": typeof import("./app/routes/admin.coupons.tsx");
+  "routes/admin.messages": typeof import("./app/routes/admin.messages.tsx");
   "routes/api.cart": typeof import("./app/routes/api.cart.tsx");
   "routes/api.cart.$productId": typeof import("./app/routes/api.cart.$productId.tsx");
   "routes/api.wishlist": typeof import("./app/routes/api.wishlist.tsx");
@@ -308,7 +411,13 @@ type RouteModules = {
   "routes/api.orders": typeof import("./app/routes/api.orders.tsx");
   "routes/api.orders.lookup": typeof import("./app/routes/api.orders.lookup.tsx");
   "routes/api.coupons.validate": typeof import("./app/routes/api.coupons.validate.tsx");
+  "routes/api.contact": typeof import("./app/routes/api.contact.tsx");
   "routes/api.my-orders": typeof import("./app/routes/api.my-orders.tsx");
+  "routes/api.my-orders.$id.cancel": typeof import("./app/routes/api.my-orders.$id.cancel.tsx");
+  "routes/api.addresses": typeof import("./app/routes/api.addresses.tsx");
+  "routes/api.addresses.$id": typeof import("./app/routes/api.addresses.$id.tsx");
+  "routes/api.profile": typeof import("./app/routes/api.profile.tsx");
+  "routes/api.profile.password": typeof import("./app/routes/api.profile.password.tsx");
   "routes/api.auth.register": typeof import("./app/routes/api.auth.register.tsx");
   "routes/api.auth.login": typeof import("./app/routes/api.auth.login.tsx");
   "routes/api.auth.logout": typeof import("./app/routes/api.auth.logout.tsx");
@@ -318,5 +427,6 @@ type RouteModules = {
   "routes/api.admin.products.$id": typeof import("./app/routes/api.admin.products.$id.tsx");
   "routes/api.admin.orders": typeof import("./app/routes/api.admin.orders.tsx");
   "routes/api.admin.coupons": typeof import("./app/routes/api.admin.coupons.tsx");
+  "routes/api.admin.messages": typeof import("./app/routes/api.admin.messages.tsx");
   "routes/404": typeof import("./app/routes/404.tsx");
 };

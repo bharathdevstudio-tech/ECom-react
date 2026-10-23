@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { Route } from "./+types/profile";
 import { useAuth } from "@/components/auth/AuthContext";
+import AddressBook from "@/components/account/AddressBook";
 import { formatPrice } from "@/lib/format";
 import type { UserProfile } from "@/lib/types";
 
@@ -312,6 +313,10 @@ export default function ProfilePage() {
             </button>
           </form>
         </section>
+      </div>
+
+      <div className="mt-6">
+        <AddressBook />
       </div>
 
       {/* Quick links */}

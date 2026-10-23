@@ -23,6 +23,7 @@ export default function AdminOrdersPage() {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [updating, setUpdating] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const fetchOrders = () => {
     setLoading(true);
@@ -36,13 +37,26 @@ export default function AdminOrdersPage() {
 
   async function updateStatus(id: number, status: string) {
     setUpdating(id);
-    await fetch("/api/admin/orders", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    setOrders((prev) => prev.map((o) => o.id === id ? { ...o, status } : o));
-    setUpdating(null);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/admin/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setActionError(data.error ?? "Could not update this order.");
+        fetchOrders();
+        return;
+      }
+      setOrders((prev) => prev.map((o) => o.id === id ? { ...o, status } : o));
+    } catch {
+      setActionError("Network error. The order was not updated.");
+      fetchOrders();
+    } finally {
+      setUpdating(null);
+    }
   }
 
   const filtered = orders.filter((o) => {
@@ -61,6 +75,21 @@ export default function AdminOrdersPage() {
         <h1 className="mt-1 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">Orders</h1>
         <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{orders.length} total</p>
       </div>
+
+      {actionError && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/50 dark:bg-red-950/40 dark:text-red-400">
+          <span aria-hidden="true">⚠️</span>
+          <p className="flex-1">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="shrink-0 rounded-full p-0.5 hover:bg-red-100 dark:hover:bg-red-900/40"
+            aria-label="Dismiss error"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap gap-3">

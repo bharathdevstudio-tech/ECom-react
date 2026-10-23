@@ -17,11 +17,70 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled:  "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300",
 };
 
+const STATUS_STEPS = ["confirmed", "processing", "shipped", "delivered"] as const;
+const STEP_LABELS: Record<(typeof STATUS_STEPS)[number], string> = {
+  confirmed: "Order placed",
+  processing: "Packed",
+  shipped: "Shipped",
+  delivered: "Delivered",
+};
+
+function OrderTimeline({ status }: { status: string }) {
+  if (status === "cancelled") {
+    return (
+      <div className="mt-4 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs font-medium text-red-700 dark:border-red-800/50 dark:bg-red-950/30 dark:text-red-300">
+        <span aria-hidden="true">✕</span>
+        This order was cancelled and the items were returned to stock.
+      </div>
+    );
+  }
+
+  const current = Math.max(0, STATUS_STEPS.indexOf(status as (typeof STATUS_STEPS)[number]));
+  return (
+    <ol className="mt-4 flex items-center gap-1" aria-label={`Order status: ${status}`}>
+      {STATUS_STEPS.map((step, index) => {
+        const done = index <= current;
+        return (
+          <li key={step} className="flex min-w-0 flex-1 items-center gap-1">
+            <div className="flex min-w-0 flex-col items-center">
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                  done
+                    ? "bg-violet-600 text-white"
+                    : "border border-zinc-300 bg-white text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-500"
+                }`}
+              >
+                {done ? "✓" : index + 1}
+              </span>
+              <span
+                className={`mt-1 truncate text-[10px] font-medium ${
+                  done ? "text-violet-700 dark:text-violet-300" : "text-zinc-400 dark:text-zinc-500"
+                }`}
+              >
+                {STEP_LABELS[step]}
+              </span>
+            </div>
+            {index < STATUS_STEPS.length - 1 && (
+              <span
+                className={`mb-4 h-0.5 flex-1 rounded-full ${
+                  index < current ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-700"
+                }`}
+              />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export default function MyOrdersPage() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cancelling, setCancelling] = useState<number | null>(null);
+  const [notice, setNotice] = useState<{ orderId: number; type: "ok" | "error"; message: string } | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -31,6 +90,31 @@ export default function MyOrdersPage() {
       .then((d: { orders: AdminOrderRow[] }) => setOrders(d.orders ?? []))
       .finally(() => setLoading(false));
   }, [user, authLoading, navigate]);
+
+  async function cancelOrder(order: AdminOrderRow) {
+    if (cancelling !== null) return;
+    const confirmed = window.confirm(
+      `Cancel order ${order.order_number}? The items will be returned to stock.`,
+    );
+    if (!confirmed) return;
+
+    setNotice(null);
+    setCancelling(order.id);
+    try {
+      const res = await fetch(`/api/my-orders/${order.id}/cancel`, { method: "POST" });
+      const data = (await res.json()) as { ok?: boolean; order?: AdminOrderRow; error?: string };
+      if (!res.ok || !data.ok || !data.order) {
+        setNotice({ orderId: order.id, type: "error", message: data.error ?? "Could not cancel this order." });
+        return;
+      }
+      setOrders((prev) => prev.map((row) => (row.id === order.id ? data.order! : row)));
+      setNotice({ orderId: order.id, type: "ok", message: "Order cancelled. A refund will reach you in 3–5 business days." });
+    } catch {
+      setNotice({ orderId: order.id, type: "error", message: "Network error. Try again." });
+    } finally {
+      setCancelling(null);
+    }
+  }
 
   if (authLoading || loading) {
     return (
@@ -71,29 +155,59 @@ export default function MyOrdersPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {orders.map((order) => (
-            <div key={order.id} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="font-mono text-sm font-bold text-zinc-900 dark:text-zinc-50">{order.order_number}</p>
-                  <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{new Date(order.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+          {orders.map((order) => {
+            const canCancel = order.status === "confirmed" || order.status === "processing";
+            return (
+              <div key={order.id} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-mono text-sm font-bold text-zinc-900 dark:text-zinc-50">{order.order_number}</p>
+                    <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{new Date(order.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${STATUS_STYLES[order.status] ?? "bg-zinc-100 text-zinc-600"}`}>
+                    {order.status}
+                  </span>
                 </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${STATUS_STYLES[order.status] ?? "bg-zinc-100 text-zinc-600"}`}>
-                  {order.status}
-                </span>
-              </div>
-              {order.items_summary && (
-                <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2">{order.items_summary}</p>
-              )}
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                <div className="flex gap-4 text-sm">
-                  <span className="text-zinc-500 dark:text-zinc-400">Subtotal <span className="font-semibold text-zinc-900 dark:text-zinc-50">{formatPrice(order.subtotal_cents / 100)}</span></span>
-                  <span className="text-zinc-500 dark:text-zinc-400">Total <span className="font-semibold text-zinc-900 dark:text-zinc-50">{formatPrice(order.total_cents / 100)}</span></span>
+                {order.items_summary && (
+                  <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2">{order.items_summary}</p>
+                )}
+
+                <OrderTimeline status={order.status} />
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                  <div className="flex gap-4 text-sm">
+                    <span className="text-zinc-500 dark:text-zinc-400">Subtotal <span className="font-semibold text-zinc-900 dark:text-zinc-50">{formatPrice(order.subtotal_cents / 100)}</span></span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Total <span className="font-semibold text-zinc-900 dark:text-zinc-50">{formatPrice(order.total_cents / 100)}</span></span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500">{order.city}, {order.zip}</p>
+                    {canCancel && (
+                      <button
+                        type="button"
+                        onClick={() => cancelOrder(order)}
+                        disabled={cancelling !== null}
+                        className="rounded-full border border-red-200 px-4 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-wait disabled:opacity-60 dark:border-red-800/60 dark:text-red-400 dark:hover:bg-red-950/30"
+                      >
+                        {cancelling === order.id ? "Cancelling…" : "Cancel order"}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500">{order.city}, {order.zip}</p>
+
+                {notice?.orderId === order.id && (
+                  <p
+                    className={`mt-3 rounded-xl px-3 py-2 text-xs font-medium ${
+                      notice.type === "ok"
+                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+                        : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400"
+                    }`}
+                  >
+                    {notice.message}
+                  </p>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

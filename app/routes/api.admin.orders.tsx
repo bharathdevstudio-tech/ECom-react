@@ -28,7 +28,12 @@ export async function action({ request }: Route.ActionArgs) {
   const { id, status } = (await request.json()) as { id: number; status: string };
   const valid = ["confirmed", "processing", "shipped", "delivered", "cancelled"];
   if (!valid.includes(status)) return Response.json({ error: "Invalid status" }, { status: 400 });
-  const ok = await db.adminUpdateOrderStatus(id, status);
-  if (!ok) return Response.json({ error: "Order not found" }, { status: 404 });
-  return Response.json({ ok: true });
+  try {
+    const ok = await db.adminUpdateOrderStatus(id, status);
+    if (!ok) return Response.json({ error: "Order not found" }, { status: 404 });
+    return Response.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Could not update order";
+    return Response.json({ error: message }, { status: 400 });
+  }
 }

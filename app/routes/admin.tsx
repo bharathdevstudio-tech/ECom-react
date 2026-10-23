@@ -12,6 +12,8 @@ const navItems = [
   { to: "/admin/products", label: "Products", icon: "📦", end: false },
   { to: "/admin/orders", label: "Orders", icon: "🧾", end: false },
   { to: "/admin/coupons", label: "Coupons", icon: "🎟️", end: false },
+  { to: "/admin/customers", label: "Customers", icon: "👥", end: false },
+  { to: "/admin/messages", label: "Messages", icon: "💬", end: false },
 ];
 
 export default function AdminLayout() {

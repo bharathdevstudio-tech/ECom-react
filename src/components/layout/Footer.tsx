@@ -5,17 +5,24 @@ const shopLinks = [
   { href: "/products?category=Audio", label: "Audio" },
   { href: "/products?category=Wearables", label: "Wearables" },
   { href: "/products?category=Accessories", label: "Accessories" },
-  { href: "/products?category=Drones", label: "Drones" },
+  { href: "/products?category=Tablets", label: "Tablets" },
+  { href: "/products?category=Cameras", label: "Cameras" },
 ];
 
 const helpLinks = [
-  { href: "/cart", label: "Your cart" },
-  { href: "/wishlist", label: "Wishlist" },
-  { href: "/checkout", label: "Checkout" },
-  { href: "/order-confirmation", label: "Track an order" },
+  { href: "/faq", label: "Help center" },
+  { href: "/shipping-returns", label: "Shipping & returns" },
+  { href: "/order-lookup", label: "Track an order" },
+  { href: "/contact", label: "Contact us" },
+  { href: "/about", label: "About Nova" },
 ];
 
-const badges = ["Visa", "Mastercard", "PayPal", "Apple Pay"];
+const legalLinks = [
+  { href: "/privacy", label: "Privacy" },
+  { href: "/terms", label: "Terms" },
+];
+
+const badges = ["Visa", "Mastercard", "UPI", "Cash on delivery"];
 
 export default function Footer() {
   return (
@@ -112,9 +119,22 @@ export default function Footer() {
 
         {/* Bottom bar */}
         <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-zinc-200 pt-6 dark:border-zinc-800 sm:flex-row">
-          <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            © {new Date().getFullYear()} Nova Store. Demo store — data stored locally in SQLite.
-          </p>
+          <div className="flex flex-col items-center gap-1 sm:items-start">
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">
+              © {new Date().getFullYear()} Nova Store. Built with React Router on Cloudflare.
+            </p>
+            <div className="flex gap-3">
+              {legalLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  to={link.href}
+                  className="text-xs text-zinc-400 transition-colors hover:text-violet-600 dark:text-zinc-500 dark:hover:text-violet-400"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+          </div>
           <div className="flex flex-wrap items-center justify-center gap-2">
             {badges.map((b) => (
               <span

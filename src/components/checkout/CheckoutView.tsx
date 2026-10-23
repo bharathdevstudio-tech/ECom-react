@@ -1,15 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useCart } from "@/components/cart/CartContext";
+import { useAuth } from "@/components/auth/AuthContext";
 import { createBrowserStore } from "@/lib/clientStore";
 import { formatPrice } from "@/lib/format";
-import type { CouponValidation, OrderConfirmation, OrderInput } from "@/lib/types";
+import type { Address, CouponValidation, OrderConfirmation, OrderInput } from "@/lib/types";
 import { FREE_SHIPPING_THRESHOLD, FLAT_SHIPPING, TAX_RATE } from "@/lib/constants";
 
 const confirmationStore = createBrowserStore<OrderConfirmation | null>(
   "__nova_confirmation_store__",
   null,
 );
+
+type ShippingForm = {
+  fullName: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+};
 
 function Field({
   label,
@@ -18,6 +29,9 @@ function Field({
   placeholder,
   autoComplete,
   inputMode,
+  value,
+  onChange,
+  required = true,
 }: {
   label: string;
   name: string;
@@ -25,6 +39,9 @@ function Field({
   placeholder: string;
   autoComplete: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
 }) {
   return (
     <label className="block">
@@ -34,10 +51,12 @@ function Field({
       <input
         name={name}
         type={type}
-        required
+        required={required}
         autoComplete={autoComplete}
         placeholder={placeholder}
         inputMode={inputMode}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         className="h-12 w-full rounded-xl border border-zinc-300 bg-white px-4 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:placeholder:text-zinc-500"
       />
     </label>
@@ -73,8 +92,15 @@ function SubmitButton({ placing, total, hidden }: { placing: boolean; total: num
   );
 }
 
+const paymentOptions = [
+  { value: "cod", label: "Cash on delivery", hint: "Pay when your order arrives" },
+  { value: "card", label: "Credit / debit card", hint: "Demo checkout — no real charge" },
+  { value: "upi", label: "UPI", hint: "Demo checkout — no real charge" },
+] as const;
+
 export default function CheckoutView() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { items, count, subtotal, clearCart } = useCart();
   const [placing, setPlacing] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
@@ -82,15 +108,67 @@ export default function CheckoutView() {
   const [coupon, setCoupon] = useState<Extract<CouponValidation, { ok: true }> | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [saveAddress, setSaveAddress] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"cod" | "card" | "upi">("cod");
+  const [shipping, setShipping] = useState<ShippingForm>({
+    fullName: user?.name ?? "",
+    email: user?.email ?? "",
+    phone: "",
+    address: "",
+    city: "",
+    state: "",
+    zip: "",
+  });
+
+  function setField(key: keyof ShippingForm, value: string) {
+    setShipping((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function applyAddress(address: Address) {
+    setSelectedAddressId(address.id);
+    setShipping((prev) => ({
+      ...prev,
+      fullName: address.fullName,
+      email: prev.email || user?.email || "",
+      phone: address.phone,
+      address: address.line2 ? `${address.line1}, ${address.line2}` : address.line1,
+      city: address.city,
+      state: address.state,
+      zip: address.zip,
+    }));
+  }
+
+  // Load the customer's saved addresses and prefill the default one.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    fetch("/api/addresses")
+      .then((r) => r.json())
+      .then((d: { addresses?: Address[] }) => {
+        if (cancelled) return;
+        const list = d.addresses ?? [];
+        setAddresses(list);
+        const preferred = list.find((a) => a.isDefault) ?? list[0];
+        if (preferred) applyAddress(preferred);
+        else setSaveAddress(true);
+      })
+      .catch(() => {
+        /* address book is optional — the form still works */
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   // Preview totals (client-side, matches server logic). The discount is applied
   // to the subtotal, and shipping/tax are then computed on what remains.
   const discount = coupon?.discount ?? 0;
   const discountedSubtotal = Math.max(0, subtotal - discount);
-  const shipping =
+  const shippingCost =
     discountedSubtotal >= FREE_SHIPPING_THRESHOLD || items.length === 0 ? 0 : FLAT_SHIPPING;
   const tax = parseFloat((discountedSubtotal * TAX_RATE).toFixed(2));
-  const total = parseFloat((discountedSubtotal + shipping + tax).toFixed(2));
+  const total = parseFloat((discountedSubtotal + shippingCost + tax).toFixed(2));
 
   async function applyCoupon() {
     const code = couponInput.trim();
@@ -130,13 +208,15 @@ export default function CheckoutView() {
     if (placing || items.length === 0) return;
     setOrderError(null);
 
-    const form = new FormData(e.currentTarget);
     const input: OrderInput = {
-      fullName: String(form.get("fullName") ?? "").trim(),
-      email:    String(form.get("email")    ?? "").trim(),
-      address:  String(form.get("address")  ?? "").trim(),
-      city:     String(form.get("city")     ?? "").trim(),
-      zip:      String(form.get("zip")      ?? "").trim(),
+      fullName: shipping.fullName.trim(),
+      email: shipping.email.trim(),
+      address: shipping.address.trim(),
+      city: shipping.city.trim(),
+      zip: shipping.zip.trim(),
+      phone: shipping.phone.trim(),
+      state: shipping.state.trim(),
+      paymentMethod,
     };
 
     // Client-side guard (browser native validation already runs, this is a fallback)
@@ -163,6 +243,23 @@ export default function CheckoutView() {
       if (!res.ok) {
         setOrderError(data.error ?? "Order failed. Please try again.");
         return;
+      }
+
+      if (user && saveAddress) {
+        await fetch("/api/addresses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            label: "Home",
+            fullName: input.fullName,
+            phone: input.phone,
+            line1: input.address,
+            city: input.city,
+            state: input.state,
+            zip: input.zip,
+            country: "United States",
+          }),
+        }).catch(() => undefined);
       }
 
       confirmationStore.replace(data);
@@ -231,35 +328,154 @@ export default function CheckoutView() {
       )}
 
       <form onSubmit={handleSubmit} className="grid gap-6 md:grid-cols-[1fr_340px] lg:grid-cols-[1fr_380px]">
-        {/* ── Left: shipping form ────────────────────────────────────────── */}
+        {/* ── Left: shipping + payment ───────────────────────────────────── */}
         <div className="flex flex-col gap-5">
           <section className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-6">
             <h2 className="mb-5 font-bold text-zinc-900 dark:text-zinc-50">Shipping details</h2>
+
+            {user && addresses.length > 0 && (
+              <div className="mb-5">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Deliver to a saved address
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {addresses.map((address) => {
+                    const selected = selectedAddressId === address.id;
+                    return (
+                      <button
+                        key={address.id}
+                        type="button"
+                        onClick={() => applyAddress(address)}
+                        aria-pressed={selected}
+                        className={`rounded-xl border p-3 text-left text-xs transition-colors ${
+                          selected
+                            ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300 dark:border-violet-600 dark:bg-violet-950/30"
+                            : "border-zinc-200 hover:border-violet-300 dark:border-zinc-700 dark:hover:border-violet-700"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                          {address.label}
+                          {address.isDefault && (
+                            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">
+                              Default
+                            </span>
+                          )}
+                        </span>
+                        <span className="mt-1 block text-zinc-500 dark:text-zinc-400">
+                          {address.fullName} · {address.phone}
+                        </span>
+                        <span className="mt-0.5 block text-zinc-500 dark:text-zinc-400">
+                          {address.line1}
+                          {address.line2 ? `, ${address.line2}` : ""}, {address.city}, {address.state} {address.zip}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-500">
+                  Or edit the fields below to deliver somewhere else.{" "}
+                  <Link to="/profile" className="font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400">
+                    Manage addresses
+                  </Link>
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
-                <Field label="Full name" name="fullName" placeholder="Alex Rivera" autoComplete="name" />
+                <Field label="Full name" name="fullName" placeholder="Alex Rivera" autoComplete="name" value={shipping.fullName} onChange={(v) => setField("fullName", v)} />
               </div>
               <div className="sm:col-span-2">
-                <Field label="Email" name="email" type="email" placeholder="alex@example.com" autoComplete="email" />
+                <Field label="Email" name="email" type="email" placeholder="alex@example.com" autoComplete="email" value={shipping.email} onChange={(v) => setField("email", v)} />
               </div>
+              <Field label="Phone" name="phone" type="tel" placeholder="+1 555 123 4567" autoComplete="tel" value={shipping.phone} onChange={(v) => setField("phone", v)} />
+              <Field label="State / Province" name="state" placeholder="California" autoComplete="address-level1" value={shipping.state} onChange={(v) => setField("state", v)} />
               <div className="sm:col-span-2">
                 <Field
                   label="Street address"
                   name="address"
-                  placeholder="100 Market Street"
+                  placeholder="100 Market Street, Apt 4"
                   autoComplete="street-address"
+                  value={shipping.address}
+                  onChange={(v) => setField("address", v)}
                 />
               </div>
-              <Field label="City" name="city" placeholder="San Francisco" autoComplete="address-level2" />
+              <Field label="City" name="city" placeholder="San Francisco" autoComplete="address-level2" value={shipping.city} onChange={(v) => setField("city", v)} />
               <Field
                 label="ZIP / Postal code"
                 name="zip"
                 placeholder="94103"
                 autoComplete="postal-code"
                 inputMode="numeric"
+                value={shipping.zip}
+                onChange={(v) => setField("zip", v)}
               />
             </div>
+
+            {user && (
+              <label className="mt-4 flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                <input
+                  type="checkbox"
+                  checked={saveAddress}
+                  onChange={(e) => setSaveAddress(e.target.checked)}
+                  className="h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500"
+                />
+                Save this address to my account
+              </label>
+            )}
           </section>
+
+          {/* Payment method */}
+          <section className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-6">
+            <h2 className="mb-1 font-bold text-zinc-900 dark:text-zinc-50">Payment method</h2>
+            <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+              This demo store does not capture real payments.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {paymentOptions.map((option) => {
+                const selected = paymentMethod === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className={`cursor-pointer rounded-xl border p-3 transition-colors ${
+                      selected
+                        ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300 dark:border-violet-600 dark:bg-violet-950/30"
+                        : "border-zinc-200 hover:border-violet-300 dark:border-zinc-700 dark:hover:border-violet-700"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                      <input
+                        type="radio"
+                        name="paymentMethod"
+                        value={option.value}
+                        checked={selected}
+                        onChange={() => setPaymentMethod(option.value)}
+                        className="h-4 w-4 border-zinc-300 text-violet-600 focus:ring-violet-500"
+                      />
+                      {option.label}
+                    </span>
+                    <span className="mt-1 block pl-6 text-xs text-zinc-500 dark:text-zinc-400">
+                      {option.hint}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+
+          <label className="flex items-start gap-2 px-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <input
+              type="checkbox"
+              required
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 text-violet-600 focus:ring-violet-500"
+            />
+            <span>
+              I agree to the{" "}
+              <Link to="/terms" className="font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400">terms of sale</Link>{" "}
+              and{" "}
+              <Link to="/privacy" className="font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400">privacy policy</Link>.
+            </span>
+          </label>
 
           {/* Mobile submit (shown above summary) */}
           <SubmitButton placing={placing} total={total} hidden="desktop" />
@@ -370,10 +586,10 @@ export default function CheckoutView() {
               <div className="flex items-center justify-between">
                 <dt className="text-zinc-500 dark:text-zinc-400">Shipping</dt>
                 <dd className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
-                  {shipping === 0 ? (
+                  {shippingCost === 0 ? (
                     <span className="text-emerald-600 dark:text-emerald-400">Free</span>
                   ) : (
-                    formatPrice(shipping)
+                    formatPrice(shippingCost)
                   )}
                 </dd>
               </div>

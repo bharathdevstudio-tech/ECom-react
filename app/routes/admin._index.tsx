@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { Route } from "./+types/admin._index";
 import { formatPrice } from "@/lib/format";
-import type { AdminOrderRow } from "@/lib/types";
+import type { AdminOrderRow, Product } from "@/lib/types";
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: "Dashboard — Admin — Nova Store" }];
@@ -13,6 +13,7 @@ type Stats = {
   totalOrders: number;
   totalRevenueCents: number;
   totalUsers: number;
+  lowStock: Product[];
   recentOrders: AdminOrderRow[];
 };
 
@@ -65,6 +66,53 @@ export default function AdminDashboard() {
               </div>
             ))}
       </div>
+
+      {/* Low stock */}
+      {stats !== null && stats.lowStock.length > 0 && (
+        <div className="mt-10">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">Low stock</h2>
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                {stats.lowStock.length}
+              </span>
+            </div>
+            <Link to="/admin/products" className="text-sm font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400">
+              Manage stock →
+            </Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {stats.lowStock.map((product) => (
+              <Link
+                key={product.id}
+                to={`/products/${product.id}`}
+                className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-3 transition-colors hover:border-amber-300 dark:border-amber-900/50 dark:bg-amber-950/20"
+              >
+                <div className="h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-white dark:bg-zinc-900">
+                  {product.image ? (
+                    <img src={product.image} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${product.gradient}`}>
+                      {product.emoji}
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">{product.name}</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">{product.category}</p>
+                </div>
+                <span className={`ml-auto shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${
+                  product.stock === 0
+                    ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300"
+                    : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                }`}>
+                  {product.stock === 0 ? "Out" : `${product.stock} left`}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recent orders */}
       <div className="mt-10">

@@ -18,9 +18,17 @@ import ProductCard from "@/components/product/ProductCard";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   if (!loaderData?.product) return [{ title: "Product not found — Nova Store" }];
+  const { product, origin } = loaderData;
+  const url = `${origin}/products/${product.id}`;
   return [
-    { title: `${loaderData.product.name} — Nova Store` },
-    { name: "description", content: loaderData.product.tagline },
+    { title: `${product.name} — Nova Store` },
+    { name: "description", content: product.tagline },
+    { tagName: "link", rel: "canonical", href: url },
+    { property: "og:type", content: "product" },
+    { property: "og:title", content: product.name },
+    { property: "og:description", content: product.tagline },
+    { property: "og:url", content: url },
+    ...(product.image ? [{ property: "og:image", content: `${origin}${product.image}` }] : []),
   ];
 }
 
@@ -84,7 +92,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const user = await getUserFromSession(sessionId);
   const userReview = user ? await getUserReview(params.id, user.id) : undefined;
 
-  return { product, features, reviews, related, user, userReview };
+  return { product, features, reviews, related, user, userReview, origin: new URL(request.url).origin };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -110,15 +118,52 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function ProductPage({ loaderData }: Route.ComponentProps) {
-  const { product, features, reviews, related, user, userReview } = loaderData;
+  const { product, features, reviews, related, user, userReview, origin } = loaderData;
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const submitting = navigation.state === "submitting";
   const discount = getDiscountPercent(product);
   const specs = categorySpecs[product.category] ?? [];
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description: product.description,
+    sku: product.id,
+    category: product.category,
+    brand: { "@type": "Brand", name: product.name.split(" ")[0] },
+    ...(product.image ? { image: `${origin}${product.image}` } : {}),
+    offers: {
+      "@type": "Offer",
+      url: `${origin}/products/${product.id}`,
+      priceCurrency: "USD",
+      price: product.price.toFixed(2),
+      availability:
+        product.stock > 0
+          ? "https://schema.org/InStock"
+          : "https://schema.org/OutOfStock",
+      itemCondition: "https://schema.org/NewCondition",
+    },
+    ...(product.reviews > 0
+      ? {
+          aggregateRating: {
+            "@type": "AggregateRating",
+            ratingValue: product.rating,
+            reviewCount: product.reviews,
+          },
+        }
+      : {}),
+  };
+
   return (
     <div className="flex-1">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+        }}
+      />
       <RecordView productId={product.id} />
 
       <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10">

@@ -13,6 +13,11 @@ import type {
   CouponInput,
   CouponType,
   UserProfile,
+  Address,
+  AddressInput,
+  ContactMessage,
+  ContactMessageInput,
+  AdminCustomer,
 } from "@/lib/types";
 import { seedProducts, seedCategories, seedReviewsFor } from "@/server/seed";
 
@@ -293,6 +298,30 @@ const SCHEMA_STATEMENTS: string[] = [
     expires_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  `CREATE TABLE IF NOT EXISTS addresses (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT 'Home',
+    full_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    line1 TEXT NOT NULL,
+    line2 TEXT NOT NULL DEFAULT '',
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    zip TEXT NOT NULL,
+    country TEXT NOT NULL DEFAULT 'United States',
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS contact_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
   `CREATE TABLE IF NOT EXISTS inventory_movements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id TEXT NOT NULL,
@@ -317,6 +346,9 @@ const COLUMN_MIGRATIONS: string[] = [
   `ALTER TABLE orders ADD COLUMN tax_cents INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE orders ADD COLUMN discount_cents INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE orders ADD COLUMN coupon_code TEXT`,
+  `ALTER TABLE orders ADD COLUMN phone TEXT`,
+  `ALTER TABLE orders ADD COLUMN state TEXT`,
+  `ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'cod'`,
   `ALTER TABLE reviews ADD COLUMN user_id TEXT`,
 ];
 
@@ -326,6 +358,7 @@ const POST_MIGRATION_INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number)`,
   `CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory_movements(product_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_addresses_user ON addresses(user_id)`,
   // Reviews used to be unique on (product_id, author, date). Customer reviews
   // are unique per user instead, while seeded reviews keep their dedupe key.
   `DROP INDEX IF EXISTS idx_reviews_unique`,
@@ -606,6 +639,209 @@ export async function changePassword(
   const salt = generateSalt();
   const hash = await hashPassword(newPassword, salt);
   await backend.run("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", [hash, salt, userId]);
+}
+
+// ─── Saved addresses ─────────────────────────────────────────────────────────
+type AddressRow = {
+  id: string; user_id: string; label: string; full_name: string; phone: string;
+  line1: string; line2: string; city: string; state: string; zip: string;
+  country: string; is_default: number; created_at: string;
+};
+
+function rowToAddress(row: AddressRow): Address {
+  return {
+    id: row.id,
+    label: row.label,
+    fullName: row.full_name,
+    phone: row.phone,
+    line1: row.line1,
+    line2: row.line2,
+    city: row.city,
+    state: row.state,
+    zip: row.zip,
+    country: row.country,
+    isDefault: row.is_default === 1,
+    createdAt: row.created_at,
+  };
+}
+
+function validateAddressInput(input: AddressInput): void {
+  if (!input.fullName?.trim()) throw new Error("Full name is required");
+  if (!input.phone?.trim() || !/^[+()\d\s-]{7,20}$/.test(input.phone.trim())) {
+    throw new Error("Enter a valid phone number");
+  }
+  if (!input.line1?.trim()) throw new Error("Address line 1 is required");
+  if (!input.city?.trim()) throw new Error("City is required");
+  if (!input.state?.trim()) throw new Error("State is required");
+  if (!input.zip?.trim() || input.zip.trim().length < 3) throw new Error("Enter a valid ZIP / postal code");
+  if (input.fullName.trim().length > 80) throw new Error("Name is too long");
+}
+
+export async function getAddresses(userId: string): Promise<Address[]> {
+  const backend = await getBackend();
+  return (
+    await backend.all<AddressRow>(
+      "SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, created_at DESC",
+      [userId],
+    )
+  ).map(rowToAddress);
+}
+
+export async function getAddress(userId: string, id: string): Promise<Address | undefined> {
+  const backend = await getBackend();
+  const row = await backend.get<AddressRow>(
+    "SELECT * FROM addresses WHERE id = ? AND user_id = ?",
+    [id, userId],
+  );
+  return row ? rowToAddress(row) : undefined;
+}
+
+export async function createAddress(userId: string, input: AddressInput): Promise<Address> {
+  validateAddressInput(input);
+  const backend = await getBackend();
+  const id = crypto.randomUUID();
+  const existing = await backend.get<{ c: number }>(
+    "SELECT COUNT(*) AS c FROM addresses WHERE user_id = ?",
+    [userId],
+  );
+  const isDefault = input.isDefault === true || Number(existing?.c ?? 0) === 0;
+
+  if (isDefault) {
+    await backend.run("UPDATE addresses SET is_default = 0 WHERE user_id = ?", [userId]);
+  }
+  await backend.run(
+    `INSERT INTO addresses (id, user_id, label, full_name, phone, line1, line2, city, state, zip, country, is_default)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      userId,
+      (input.label ?? "Home").trim() || "Home",
+      input.fullName.trim(),
+      input.phone.trim(),
+      input.line1.trim(),
+      (input.line2 ?? "").trim(),
+      input.city.trim(),
+      input.state.trim(),
+      input.zip.trim(),
+      (input.country ?? "United States").trim() || "United States",
+      isDefault ? 1 : 0,
+    ],
+  );
+  return (await getAddress(userId, id))!;
+}
+
+export async function updateAddress(
+  userId: string,
+  id: string,
+  input: Partial<AddressInput>,
+): Promise<Address> {
+  const backend = await getBackend();
+  const current = await getAddress(userId, id);
+  if (!current) throw new Error("Address not found");
+
+  const merged: AddressInput = {
+    label: input.label ?? current.label,
+    fullName: input.fullName ?? current.fullName,
+    phone: input.phone ?? current.phone,
+    line1: input.line1 ?? current.line1,
+    line2: input.line2 ?? current.line2,
+    city: input.city ?? current.city,
+    state: input.state ?? current.state,
+    zip: input.zip ?? current.zip,
+    country: input.country ?? current.country,
+    isDefault: input.isDefault ?? current.isDefault,
+  };
+  validateAddressInput(merged);
+
+  if (merged.isDefault) {
+    await backend.run("UPDATE addresses SET is_default = 0 WHERE user_id = ?", [userId]);
+  }
+  await backend.run(
+    `UPDATE addresses SET label = ?, full_name = ?, phone = ?, line1 = ?, line2 = ?,
+      city = ?, state = ?, zip = ?, country = ?, is_default = ?
+     WHERE id = ? AND user_id = ?`,
+    [
+      merged.label!.trim() || "Home",
+      merged.fullName.trim(),
+      merged.phone.trim(),
+      merged.line1.trim(),
+      (merged.line2 ?? "").trim(),
+      merged.city.trim(),
+      merged.state.trim(),
+      merged.zip.trim(),
+      (merged.country ?? "United States").trim() || "United States",
+      merged.isDefault ? 1 : 0,
+      id,
+      userId,
+    ],
+  );
+  return (await getAddress(userId, id))!;
+}
+
+export async function deleteAddress(userId: string, id: string): Promise<boolean> {
+  const backend = await getBackend();
+  const current = await getAddress(userId, id);
+  if (!current) return false;
+  const info = await backend.run("DELETE FROM addresses WHERE id = ? AND user_id = ?", [id, userId]);
+  if (current.isDefault) {
+    const next = await backend.get<{ id: string }>(
+      "SELECT id FROM addresses WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+      [userId],
+    );
+    if (next) await backend.run("UPDATE addresses SET is_default = 1 WHERE id = ?", [next.id]);
+  }
+  return info.changes > 0;
+}
+
+export async function setDefaultAddress(userId: string, id: string): Promise<boolean> {
+  const address = await getAddress(userId, id);
+  if (!address) return false;
+  const backend = await getBackend();
+  await backend.run("UPDATE addresses SET is_default = 0 WHERE user_id = ?", [userId]);
+  await backend.run("UPDATE addresses SET is_default = 1 WHERE id = ? AND user_id = ?", [id, userId]);
+  return true;
+}
+
+// ─── Support messages ────────────────────────────────────────────────────────
+export async function createContactMessage(input: ContactMessageInput): Promise<number> {
+  const name = input.name?.trim();
+  const email = input.email?.trim().toLowerCase();
+  const subject = input.subject?.trim();
+  const message = input.message?.trim();
+
+  if (!name) throw new Error("Name is required");
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address");
+  if (!subject || subject.length < 3) throw new Error("Add a subject of at least 3 characters");
+  if (!message || message.length < 10) throw new Error("Tell us a little more (at least 10 characters)");
+  if (message.length > 4000) throw new Error("Message is too long (max 4000 characters)");
+
+  const backend = await getBackend();
+  const info = await backend.run(
+    `INSERT INTO contact_messages (name, email, subject, message) VALUES (?, ?, ?, ?)`,
+    [name, email, subject, message],
+  );
+  return info.lastInsertRowid;
+}
+
+export async function adminGetContactMessages(limit = 100, offset = 0): Promise<ContactMessage[]> {
+  const backend = await getBackend();
+  return backend.all<ContactMessage>(
+    "SELECT * FROM contact_messages ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+    [limit, offset],
+  );
+}
+
+export async function adminUpdateContactMessage(id: number, status: "new" | "read"): Promise<boolean> {
+  if (status !== "new" && status !== "read") throw new Error("Invalid status");
+  const backend = await getBackend();
+  const info = await backend.run("UPDATE contact_messages SET status = ? WHERE id = ?", [status, id]);
+  return info.changes > 0;
+}
+
+export async function adminDeleteContactMessage(id: number): Promise<boolean> {
+  const backend = await getBackend();
+  const info = await backend.run("DELETE FROM contact_messages WHERE id = ?", [id]);
+  return info.changes > 0;
 }
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
@@ -1106,12 +1342,19 @@ export async function placeOrder(
   couponCode?: string,
 ): Promise<OrderConfirmation> {
   // ── Server-side validation ────────────────────────────────────────────────
-  const { fullName, email, address, city, zip } = input;
+  const { fullName, email, address, city, zip, phone, state, paymentMethod } = input;
   if (!fullName?.trim() || !email?.trim() || !address?.trim() || !city?.trim() || !zip?.trim()) {
     throw new Error("All shipping fields are required");
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
     throw new Error("Invalid email address");
+  }
+  if (phone !== undefined && (!phone.trim() || !/^[+()\d\s-]{7,20}$/.test(phone.trim()))) {
+    throw new Error("Enter a valid phone number");
+  }
+  const payment = paymentMethod ?? "cod";
+  if (!["cod", "card", "upi"].includes(payment)) {
+    throw new Error("Invalid payment method");
   }
   if (!items || items.length === 0) {
     throw new Error("Cart is empty");
@@ -1187,9 +1430,9 @@ export async function placeOrder(
   let orderId: number;
   try {
     const info = await backend.run(
-      `INSERT INTO orders (session_id, user_id, order_number, full_name, email, address, city, zip,
-        subtotal_cents, discount_cents, shipping_cents, tax_cents, total_cents, coupon_code, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
+      `INSERT INTO orders (session_id, user_id, order_number, full_name, email, address, city, zip, phone, state,
+        subtotal_cents, discount_cents, shipping_cents, tax_cents, total_cents, coupon_code, payment_method, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
       [
         sessionId,
         userId ?? null,
@@ -1199,12 +1442,15 @@ export async function placeOrder(
         input.address.trim(),
         input.city.trim(),
         input.zip.trim(),
+        phone?.trim() || null,
+        state?.trim() || null,
         subtotalCents,
         discountCents,
         Math.round(authShipping * 100),
         Math.round(authTax * 100),
         Math.round(authTotal * 100),
         appliedCode,
+        payment,
       ],
     );
     orderId = info.lastInsertRowid;
@@ -1309,8 +1555,75 @@ export async function adminGetOrderById(id: number): Promise<AdminOrderRow | und
 
 export async function adminUpdateOrderStatus(id: number, status: string): Promise<boolean> {
   const backend = await getBackend();
+  const order = await backend.get<{ status: string; user_id: string | null }>(
+    "SELECT status, user_id FROM orders WHERE id = ?",
+    [id],
+  );
+  if (!order) return false;
+  if (order.status === status) return true;
+  if (order.status === "cancelled") {
+    throw new Error("Cancelled orders cannot be reopened");
+  }
+
   const info = await backend.run("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
-  return info.changes > 0;
+  if (info.changes === 0) return false;
+
+  // Cancelling (from either the admin panel or the customer's account) puts the
+  // reserved inventory back and records it in the stock ledger.
+  if (status === "cancelled") {
+    await restoreOrderStock(id);
+  }
+  return true;
+}
+
+async function restoreOrderStock(orderId: number): Promise<void> {
+  const backend = await getBackend();
+  const items = await backend.all<{ product_id: string; quantity: number }>(
+    "SELECT product_id, quantity FROM order_items WHERE order_id = ?",
+    [orderId],
+  );
+  for (const item of items) {
+    if (!item.product_id || item.quantity <= 0) continue;
+    await backend.run("UPDATE products SET stock = stock + ? WHERE id = ?", [
+      item.quantity,
+      item.product_id,
+    ]);
+    await backend.run(
+      "INSERT INTO inventory_movements (product_id, delta, reason, order_id) VALUES (?, ?, 'cancel', ?)",
+      [item.product_id, item.quantity, orderId],
+    );
+  }
+}
+
+/**
+ * Customer-initiated cancellation. Only orders that have not shipped yet can
+ * be cancelled, and stock is restored exactly once.
+ */
+export async function cancelOrderByUser(userId: string, orderId: number): Promise<AdminOrderRow> {
+  const backend = await getBackend();
+  const order = await backend.get<AdminOrderRow>(
+    "SELECT * FROM orders WHERE id = ? AND user_id = ?",
+    [orderId, userId],
+  );
+  if (!order) throw new Error("Order not found");
+  if (order.status === "cancelled") throw new Error("This order is already cancelled");
+  if (order.status !== "confirmed" && order.status !== "processing") {
+    throw new Error("This order has already shipped and can no longer be cancelled");
+  }
+
+  // Conditional update guarantees two concurrent cancel clicks cannot both
+  // restore stock.
+  const info = await backend.run(
+    `UPDATE orders SET status = 'cancelled'
+     WHERE id = ? AND user_id = ? AND status IN ('confirmed', 'processing')`,
+    [orderId, userId],
+  );
+  if (info.changes === 0) {
+    throw new Error("This order can no longer be cancelled");
+  }
+  await restoreOrderStock(orderId);
+
+  return (await adminGetOrderById(orderId))!;
 }
 
 export async function adminGetStats(): Promise<{
@@ -1318,19 +1631,37 @@ export async function adminGetStats(): Promise<{
   totalOrders: number;
   totalRevenueCents: number;
   totalUsers: number;
+  lowStock: Product[];
   recentOrders: AdminOrderRow[];
 }> {
   const backend = await getBackend();
   const totalProducts = (await backend.get<{ c: number }>("SELECT COUNT(*) AS c FROM products"))?.c ?? 0;
   const totalOrders = (await backend.get<{ c: number }>("SELECT COUNT(*) AS c FROM orders"))?.c ?? 0;
-  const totalRevenueCents = (await backend.get<{ c: number }>("SELECT COALESCE(SUM(total_cents),0) AS c FROM orders"))?.c ?? 0;
+  const totalRevenueCents = (await backend.get<{ c: number }>("SELECT COALESCE(SUM(total_cents),0) AS c FROM orders WHERE status <> 'cancelled'"))?.c ?? 0;
   const totalUsers = (await backend.get<{ c: number }>("SELECT COUNT(*) AS c FROM users"))?.c ?? 0;
+  const lowStock = (
+    await backend.all<ProductRow>(
+      "SELECT * FROM products WHERE stock <= 5 ORDER BY stock ASC, name ASC LIMIT 8",
+    )
+  ).map(rowToProduct);
   const recentOrders = await backend.all<AdminOrderRow>(
     `SELECT o.*, GROUP_CONCAT(oi.product_name || ' ×' || oi.quantity, ', ') AS items_summary
      FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id
      GROUP BY o.id ORDER BY o.created_at DESC LIMIT 5`,
   );
-  return { totalProducts, totalOrders, totalRevenueCents, totalUsers, recentOrders };
+  return { totalProducts, totalOrders, totalRevenueCents, totalUsers, lowStock, recentOrders };
+}
+
+// ─── Admin customers ─────────────────────────────────────────────────────────
+export async function adminGetCustomers(): Promise<AdminCustomer[]> {
+  const backend = await getBackend();
+  return backend.all<AdminCustomer>(
+    `SELECT u.id, u.name, u.email, u.role, u.created_at,
+       (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) AS orders,
+       (SELECT COALESCE(SUM(o.total_cents), 0) FROM orders o WHERE o.user_id = u.id AND o.status <> 'cancelled') AS total_spent_cents,
+       (SELECT MAX(o.created_at) FROM orders o WHERE o.user_id = u.id) AS last_order_at
+     FROM users u ORDER BY u.created_at DESC`,
+  );
 }
 
 // ─── Misc ────────────────────────────────────────────────────────────────────
@@ -1351,7 +1682,7 @@ export async function resetDatabase(): Promise<void> {
   const backend = await getBackend();
   const tables = [
     "order_items", "orders", "recently_viewed", "cart_items", "wishlist",
-    "sessions", "reviews", "products", "categories", "meta",
+    "sessions", "reviews", "addresses", "contact_messages", "products", "categories", "meta",
   ];
   await backend.batch(tables.map((table) => ({ sql: `DELETE FROM ${table}` })));
   seedDone = false;

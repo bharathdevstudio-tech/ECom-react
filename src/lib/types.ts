@@ -76,6 +76,70 @@ export type OrderInput = {
   address: string;
   city: string;
   zip: string;
+  /** Contact number for delivery updates. */
+  phone?: string;
+  /** State / province. */
+  state?: string;
+  /** Payment method selected at checkout. */
+  paymentMethod?: "cod" | "card" | "upi";
+};
+
+// ─── Saved addresses ──────────────────────────────────────────────────────────
+export type Address = {
+  id: string;
+  label: string;
+  fullName: string;
+  phone: string;
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+  isDefault: boolean;
+  createdAt: string;
+};
+
+export type AddressInput = {
+  label?: string;
+  fullName: string;
+  phone: string;
+  line1: string;
+  line2?: string;
+  city: string;
+  state: string;
+  zip: string;
+  country?: string;
+  isDefault?: boolean;
+};
+
+// ─── Support messages ────────────────────────────────────────────────────────
+export type ContactMessage = {
+  id: number;
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  status: "new" | "read";
+  created_at: string;
+};
+
+export type ContactMessageInput = {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+};
+
+export type AdminCustomer = {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "customer";
+  created_at: string;
+  orders: number;
+  total_spent_cents: number;
+  last_order_at: string | null;
 };
 
 export type OrderConfirmation = {
@@ -138,6 +202,9 @@ export type AdminOrderRow = {
   address: string;
   city: string;
   zip: string;
+  phone?: string | null;
+  state?: string | null;
+  payment_method?: string | null;
   subtotal_cents: number;
   discount_cents?: number;
   coupon_code?: string | null;
