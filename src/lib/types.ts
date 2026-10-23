@@ -27,7 +27,46 @@ export type Review = {
   body: string;
   date: string;
   verified: boolean;
+  /** Set when the review was written by a signed-in customer. */
+  userId?: string;
 };
+
+export type ReviewInput = {
+  rating: number;
+  title: string;
+  body: string;
+};
+
+// ─── Coupons ──────────────────────────────────────────────────────────────────
+export type CouponType = "percent" | "fixed";
+
+export type Coupon = {
+  code: string;
+  type: CouponType;
+  /** Percent points (1–100) for `percent`, or cents for `fixed`. */
+  value: number;
+  minSubtotalCents: number;
+  maxUses: number | null;
+  uses: number;
+  active: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+};
+
+export type CouponInput = {
+  code: string;
+  type: CouponType;
+  value: number;
+  /** Minimum order subtotal in dollars. */
+  minSubtotal?: number;
+  maxUses?: number | null;
+  expiresAt?: string | null;
+  active?: boolean;
+};
+
+export type CouponValidation =
+  | { ok: true; code: string; discount: number; label: string }
+  | { ok: false; error: string };
 
 export type SortKey = "featured" | "price-asc" | "price-desc" | "rating";
 
@@ -44,6 +83,9 @@ export type OrderConfirmation = {
   fullName: string;
   email: string;
   subtotal: number;
+  /** Discount applied by a promo code, in dollars. */
+  discount: number;
+  couponCode?: string;
   shipping: number;
   tax: number;
   total: number;
@@ -88,6 +130,8 @@ export type AdminOrderRow = {
   city: string;
   zip: string;
   subtotal_cents: number;
+  discount_cents?: number;
+  coupon_code?: string | null;
   shipping_cents: number;
   tax_cents: number;
   total_cents: number;

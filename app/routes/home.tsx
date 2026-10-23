@@ -51,10 +51,6 @@ export default function HomePage({ loaderData }: Route.ComponentProps) {
         <div className="relative mx-auto grid w-full max-w-6xl items-center gap-10 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-2 lg:gap-14 lg:py-28">
           {/* Text */}
           <div className="flex flex-col items-start gap-6">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-violet-200 backdrop-blur">
-              <span className="h-1.5 w-1.5 rounded-full bg-violet-400" aria-hidden="true" />
-              New season · New drops
-            </span>
 
             <h1 className="text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
               Gadgets that keep{" "}

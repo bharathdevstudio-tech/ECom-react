@@ -50,6 +50,12 @@ export default function MyOrdersPage() {
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
           Signed in as <span className="font-medium text-zinc-800 dark:text-zinc-200">{user?.email}</span>
         </p>
+        <Link
+          to="/order-lookup"
+          className="mt-2 inline-block text-sm font-medium text-violet-600 transition-colors hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+        >
+          Track a guest order →
+        </Link>
       </div>
 
       {orders.length === 0 ? (

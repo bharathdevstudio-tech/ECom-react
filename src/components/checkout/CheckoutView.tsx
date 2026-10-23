@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { useCart } from "@/components/cart/CartContext";
 import { createBrowserStore } from "@/lib/clientStore";
 import { formatPrice } from "@/lib/format";
-import type { OrderConfirmation, OrderInput } from "@/lib/types";
+import type { CouponValidation, OrderConfirmation, OrderInput } from "@/lib/types";
 import { FREE_SHIPPING_THRESHOLD, FLAT_SHIPPING, TAX_RATE } from "@/lib/constants";
 
 const confirmationStore = createBrowserStore<OrderConfirmation | null>(
@@ -78,11 +78,52 @@ export default function CheckoutView() {
   const { items, count, subtotal, clearCart } = useCart();
   const [placing, setPlacing] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+  const [couponInput, setCouponInput] = useState("");
+  const [coupon, setCoupon] = useState<Extract<CouponValidation, { ok: true }> | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
 
-  // Preview totals (client-side, matches server logic)
-  const shipping = subtotal >= FREE_SHIPPING_THRESHOLD || items.length === 0 ? 0 : FLAT_SHIPPING;
-  const tax = parseFloat((subtotal * TAX_RATE).toFixed(2));
-  const total = parseFloat((subtotal + shipping + tax).toFixed(2));
+  // Preview totals (client-side, matches server logic). The discount is applied
+  // to the subtotal, and shipping/tax are then computed on what remains.
+  const discount = coupon?.discount ?? 0;
+  const discountedSubtotal = Math.max(0, subtotal - discount);
+  const shipping =
+    discountedSubtotal >= FREE_SHIPPING_THRESHOLD || items.length === 0 ? 0 : FLAT_SHIPPING;
+  const tax = parseFloat((discountedSubtotal * TAX_RATE).toFixed(2));
+  const total = parseFloat((discountedSubtotal + shipping + tax).toFixed(2));
+
+  async function applyCoupon() {
+    const code = couponInput.trim();
+    if (!code || couponLoading) return;
+    setCouponLoading(true);
+    setCouponError(null);
+    try {
+      const res = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, subtotal }),
+      });
+      const data = (await res.json()) as CouponValidation;
+      if (!res.ok || !data.ok) {
+        setCoupon(null);
+        setCouponError(!data.ok ? data.error : "That promo code isn't valid.");
+        return;
+      }
+      setCoupon(data);
+      setCouponInput(data.code);
+    } catch {
+      setCoupon(null);
+      setCouponError("Could not check that code. Try again.");
+    } finally {
+      setCouponLoading(false);
+    }
+  }
+
+  function removeCoupon() {
+    setCoupon(null);
+    setCouponInput("");
+    setCouponError(null);
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -110,7 +151,11 @@ export default function CheckoutView() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Only send input + items; server recomputes all prices, tax, shipping
-        body: JSON.stringify({ input, items }),
+        body: JSON.stringify({
+          input,
+          items,
+          couponCode: coupon?.code,
+        }),
       });
 
       const data = (await res.json()) as OrderConfirmation & { error?: string };
@@ -262,6 +307,48 @@ export default function CheckoutView() {
               ))}
             </ul>
 
+            {/* Promo code */}
+            <div className="border-b border-zinc-100 pb-4 dark:border-zinc-800">
+              {coupon ? (
+                <div className="flex items-center justify-between gap-3 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm dark:bg-emerald-950/40">
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                    {coupon.code} · {coupon.label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={removeCoupon}
+                    className="shrink-0 text-xs font-medium text-emerald-700 underline underline-offset-2 dark:text-emerald-300"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <input
+                      name="couponCode"
+                      value={couponInput}
+                      onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                      placeholder="Promo code"
+                      autoComplete="off"
+                      className="h-11 min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-3 text-sm uppercase text-zinc-900 outline-none placeholder:normal-case placeholder:text-zinc-400 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:placeholder:text-zinc-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={applyCoupon}
+                      disabled={couponLoading || !couponInput.trim()}
+                      className="h-11 shrink-0 rounded-xl border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition-colors hover:border-violet-400 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-violet-500 dark:hover:text-violet-300"
+                    >
+                      {couponLoading ? "…" : "Apply"}
+                    </button>
+                  </div>
+                  {couponError && (
+                    <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">{couponError}</p>
+                  )}
+                </>
+              )}
+            </div>
+
             {/* Totals */}
             <dl className="flex flex-col gap-3 text-sm">
               <div className="flex items-center justify-between">
@@ -270,6 +357,16 @@ export default function CheckoutView() {
                   {formatPrice(subtotal)}
                 </dd>
               </div>
+              {discount > 0 && (
+                <div className="flex items-center justify-between">
+                  <dt className="text-zinc-500 dark:text-zinc-400">
+                    Discount{coupon ? ` (${coupon.code})` : ""}
+                  </dt>
+                  <dd className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    −{formatPrice(discount)}
+                  </dd>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <dt className="text-zinc-500 dark:text-zinc-400">Shipping</dt>
                 <dd className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">

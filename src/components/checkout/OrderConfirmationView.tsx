@@ -43,6 +43,7 @@ export default function OrderConfirmationView() {
 
   // tax may be missing on old confirmations stored before the fix — default 0
   const tax = confirmation.tax ?? 0;
+  const discount = confirmation.discount ?? 0;
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 py-10 sm:px-6 sm:py-16">
@@ -97,6 +98,17 @@ export default function OrderConfirmationView() {
             </dd>
           </div>
 
+          {discount > 0 && (
+            <div className="flex items-center justify-between">
+              <dt className="text-zinc-500 dark:text-zinc-400">
+                Discount{confirmation.couponCode ? ` (${confirmation.couponCode})` : ""}
+              </dt>
+              <dd className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                −{formatPrice(discount)}
+              </dd>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <dt className="text-zinc-500 dark:text-zinc-400">Shipping</dt>
             <dd className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
@@ -147,6 +159,12 @@ export default function OrderConfirmationView() {
           className="inline-flex h-11 w-full items-center justify-center rounded-full border border-zinc-300 text-sm font-medium text-zinc-700 transition-colors hover:border-violet-400 hover:text-violet-700 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-violet-500 dark:hover:text-violet-300"
         >
           View all my orders
+        </Link>
+        <Link
+          to="/order-lookup"
+          className="text-sm font-medium text-violet-600 transition-colors hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+        >
+          Track another order
         </Link>
         <Link
           to="/"

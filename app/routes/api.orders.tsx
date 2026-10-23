@@ -12,14 +12,14 @@ export async function action({ request }: Route.ActionArgs) {
   const headers = new Headers();
   if (setCookie) headers.set("Set-Cookie", setCookie);
 
-  let body: { input: OrderInput; items: CartItem[] };
+  let body: { input: OrderInput; items: CartItem[]; couponCode?: string };
   try {
-    body = (await request.json()) as { input: OrderInput; items: CartItem[] };
+    body = (await request.json()) as { input: OrderInput; items: CartItem[]; couponCode?: string };
   } catch {
     return Response.json({ error: "Invalid request body" }, { status: 400, headers });
   }
 
-  const { input, items } = body;
+  const { input, items, couponCode } = body;
 
   // Basic field presence check (full validation happens inside placeOrder)
   if (!input?.fullName?.trim() || !input?.email?.trim() ||
@@ -34,7 +34,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   try {
     // placeOrder re-fetches all prices from DB, recomputes tax/shipping/total
-    const confirmation = await db.placeOrder(sessionId, input, items, 0, 0, user?.id);
+    const confirmation = await db.placeOrder(sessionId, input, items, 0, 0, user?.id, couponCode);
     return Response.json(confirmation, { headers });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Order failed";

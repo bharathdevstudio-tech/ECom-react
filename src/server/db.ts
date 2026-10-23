@@ -4,10 +4,14 @@ import type {
   OrderInput,
   Product,
   Review,
+  ReviewInput,
   SortKey,
   User,
   AdminOrderRow,
   AdminProductInput,
+  Coupon,
+  CouponInput,
+  CouponType,
 } from "@/lib/types";
 import { seedProducts, seedCategories, seedReviewsFor } from "@/server/seed";
 
@@ -212,6 +216,7 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id TEXT NOT NULL,
+    user_id TEXT,
     author TEXT NOT NULL,
     rating INTEGER NOT NULL,
     title TEXT NOT NULL,
@@ -276,13 +281,31 @@ const SCHEMA_STATEMENTS: string[] = [
     price_cents INTEGER NOT NULL,
     quantity INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS coupons (
+    code TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    value INTEGER NOT NULL,
+    min_subtotal_cents INTEGER NOT NULL DEFAULT 0,
+    max_uses INTEGER,
+    uses INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    expires_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS inventory_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL,
+    delta INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    order_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
   `CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)`,
   `CREATE INDEX IF NOT EXISTS idx_recently_viewed_session ON recently_viewed(session_id, viewed_at)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_unique ON reviews(product_id, author, date)`,
 ];
 
 // Columns added after the initial schema (idempotent; D1 has no
@@ -291,11 +314,24 @@ const COLUMN_MIGRATIONS: string[] = [
   `ALTER TABLE orders ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE SET NULL`,
   `ALTER TABLE sessions ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE SET NULL`,
   `ALTER TABLE orders ADD COLUMN tax_cents INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE orders ADD COLUMN discount_cents INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE orders ADD COLUMN coupon_code TEXT`,
+  `ALTER TABLE reviews ADD COLUMN user_id TEXT`,
 ];
 
+// Indexes that depend on migrated columns, or that replace an older index.
 const POST_MIGRATION_INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory_movements(product_id)`,
+  // Reviews used to be unique on (product_id, author, date). Customer reviews
+  // are unique per user instead, while seeded reviews keep their dedupe key.
+  `DROP INDEX IF EXISTS idx_reviews_unique`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_seed_unique
+     ON reviews(product_id, author, date) WHERE user_id IS NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_user_unique
+     ON reviews(product_id, user_id) WHERE user_id IS NOT NULL`,
 ];
 
 async function migrate(backend: Backend): Promise<void> {
@@ -648,15 +684,245 @@ export async function adminDeleteProduct(id: string): Promise<boolean> {
 }
 
 // ─── Reviews ─────────────────────────────────────────────────────────────────
+type ReviewRow = {
+  author: string; rating: number; title: string; body: string; date: string; verified: number;
+  user_id?: string | null;
+};
+
+function rowToReview(row: ReviewRow): Review {
+  return {
+    author: row.author,
+    rating: row.rating,
+    title: row.title,
+    body: row.body,
+    date: row.date,
+    verified: row.verified === 1,
+    userId: row.user_id ?? undefined,
+  };
+}
+
 export async function getReviews(productId: string): Promise<Review[]> {
   const backend = await getBackend();
-  const rows = await backend.all<{
-    author: string; rating: number; title: string; body: string; date: string; verified: number;
-  }>("SELECT * FROM reviews WHERE product_id = ? ORDER BY date DESC", [productId]);
-  return rows.map((row) => ({
-    author: row.author, rating: row.rating, title: row.title,
-    body: row.body, date: row.date, verified: row.verified === 1,
-  }));
+  const rows = await backend.all<ReviewRow>(
+    "SELECT * FROM reviews WHERE product_id = ? ORDER BY date DESC, id DESC",
+    [productId],
+  );
+  return rows.map(rowToReview);
+}
+
+export async function getUserReview(productId: string, userId: string): Promise<Review | undefined> {
+  const backend = await getBackend();
+  const row = await backend.get<ReviewRow>(
+    "SELECT * FROM reviews WHERE product_id = ? AND user_id = ?",
+    [productId, userId],
+  );
+  return row ? rowToReview(row) : undefined;
+}
+
+export async function addReview(
+  productId: string,
+  userId: string,
+  author: string,
+  input: ReviewInput,
+): Promise<Review> {
+  const backend = await getBackend();
+  const product = await getProduct(productId);
+  if (!product) throw new Error("Product not found");
+
+  const rating = Math.round(Number(input.rating));
+  if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+    throw new Error("Choose a rating between 1 and 5 stars");
+  }
+  const title = input.title.trim();
+  const body = input.body.trim();
+  if (title.length < 3) throw new Error("Add a title of at least 3 characters");
+  if (title.length > 120) throw new Error("Title is too long (max 120 characters)");
+  if (body.length < 10) throw new Error("Tell us a little more (at least 10 characters)");
+  if (body.length > 2000) throw new Error("Review is too long (max 2000 characters)");
+
+  if (await getUserReview(productId, userId)) {
+    throw new Error("You have already reviewed this product");
+  }
+
+  // A review counts as verified when the customer has an order with this item.
+  const purchased = await backend.get<{ hit: number }>(
+    `SELECT 1 AS hit FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     WHERE o.user_id = ? AND oi.product_id = ? LIMIT 1`,
+    [userId, productId],
+  );
+
+  const date = new Date().toISOString().slice(0, 10);
+
+  try {
+    await backend.run(
+      `INSERT INTO reviews (product_id, user_id, author, rating, title, body, date, verified)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [productId, userId, author, rating, title, body, date, purchased ? 1 : 0],
+    );
+  } catch {
+    // The partial unique index is the final guard against double submits.
+    throw new Error("You have already reviewed this product");
+  }
+
+  // Roll the seeded aggregate forward rather than recomputing it from the
+  // handful of seeded review rows (which would collapse the catalog ratings).
+  await backend.run(
+    `UPDATE products
+     SET rating = ROUND((rating * reviews + ?) / (reviews + 1), 2),
+         reviews = reviews + 1
+     WHERE id = ?`,
+    [rating, productId],
+  );
+
+  return { author, rating, title, body, date, verified: Boolean(purchased), userId };
+}
+
+// ─── Coupons ─────────────────────────────────────────────────────────────────
+type CouponRow = {
+  code: string;
+  type: string;
+  value: number;
+  min_subtotal_cents: number;
+  max_uses: number | null;
+  uses: number;
+  active: number;
+  expires_at: string | null;
+  created_at: string;
+};
+
+export function normalizeCouponCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
+function couponLabel(type: CouponType, value: number): string {
+  return type === "percent" ? `${value}% off` : `$${(value / 100).toFixed(2)} off`;
+}
+
+function rowToCoupon(row: CouponRow): Coupon {
+  return {
+    code: row.code,
+    type: row.type === "percent" ? "percent" : "fixed",
+    value: row.value,
+    minSubtotalCents: row.min_subtotal_cents,
+    maxUses: row.max_uses ?? null,
+    uses: row.uses,
+    active: row.active === 1,
+    expiresAt: row.expires_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+export async function getCoupon(code: string): Promise<Coupon | undefined> {
+  const backend = await getBackend();
+  const row = await backend.get<CouponRow>(
+    "SELECT * FROM coupons WHERE code = ?",
+    [normalizeCouponCode(code)],
+  );
+  return row ? rowToCoupon(row) : undefined;
+}
+
+export async function listCoupons(): Promise<Coupon[]> {
+  const backend = await getBackend();
+  const rows = await backend.all<CouponRow>(
+    "SELECT * FROM coupons ORDER BY created_at DESC, code ASC",
+  );
+  return rows.map(rowToCoupon);
+}
+
+export async function createCoupon(input: CouponInput): Promise<Coupon> {
+  const code = normalizeCouponCode(input.code);
+  if (!/^[A-Z0-9_-]{3,32}$/.test(code)) {
+    throw new Error("Coupon code must be 3–32 characters (letters, numbers, - or _)");
+  }
+  if (input.type !== "percent" && input.type !== "fixed") {
+    throw new Error("Coupon type must be 'percent' or 'fixed'");
+  }
+  const value = Math.round(Number(input.value));
+  if (!Number.isFinite(value) || value < 1) {
+    throw new Error("Discount value must be at least 1");
+  }
+  if (input.type === "percent" && value > 100) {
+    throw new Error("Percent discount cannot exceed 100");
+  }
+
+  const backend = await getBackend();
+  if (await backend.get("SELECT 1 AS hit FROM coupons WHERE code = ?", [code])) {
+    throw new Error(`Coupon ${code} already exists`);
+  }
+
+  const minSubtotalCents = Math.max(0, Math.round((input.minSubtotal ?? 0) * 100));
+  const maxUses =
+    input.maxUses == null || Number(input.maxUses) <= 0 ? null : Math.floor(Number(input.maxUses));
+  const expiresAt = input.expiresAt?.trim() ? input.expiresAt.trim() : null;
+  if (expiresAt && Number.isNaN(Date.parse(expiresAt))) {
+    throw new Error("Invalid expiry date");
+  }
+
+  await backend.run(
+    `INSERT INTO coupons (code, type, value, min_subtotal_cents, max_uses, uses, active, expires_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+    [code, input.type, value, minSubtotalCents, maxUses, input.active === false ? 0 : 1, expiresAt],
+  );
+
+  return (await getCoupon(code))!;
+}
+
+export async function setCouponActive(code: string, active: boolean): Promise<boolean> {
+  const backend = await getBackend();
+  const info = await backend.run(
+    "UPDATE coupons SET active = ? WHERE code = ?",
+    [active ? 1 : 0, normalizeCouponCode(code)],
+  );
+  return info.changes > 0;
+}
+
+export async function deleteCoupon(code: string): Promise<boolean> {
+  const backend = await getBackend();
+  const info = await backend.run("DELETE FROM coupons WHERE code = ?", [normalizeCouponCode(code)]);
+  return info.changes > 0;
+}
+
+/** Validates a code against an order subtotal (in cents) and returns the discount. */
+export type CouponCheck =
+  | { ok: true; code: string; discountCents: number; label: string }
+  | { ok: false; error: string };
+
+export async function validateCoupon(code: string, subtotalCents: number): Promise<CouponCheck> {
+  const normalized = normalizeCouponCode(code);
+  if (!normalized) return { ok: false, error: "Enter a promo code" };
+
+  const coupon = await getCoupon(normalized);
+  if (!coupon) return { ok: false, error: "That promo code doesn't exist" };
+  if (!coupon.active) return { ok: false, error: "That promo code is no longer active" };
+  if (coupon.expiresAt && Date.parse(coupon.expiresAt) < Date.now()) {
+    return { ok: false, error: "That promo code has expired" };
+  }
+  if (coupon.maxUses != null && coupon.uses >= coupon.maxUses) {
+    return { ok: false, error: "That promo code has reached its usage limit" };
+  }
+  if (subtotalCents < coupon.minSubtotalCents) {
+    return {
+      ok: false,
+      error: `Spend at least $${(coupon.minSubtotalCents / 100).toFixed(2)} to use this code`,
+    };
+  }
+
+  const raw =
+    coupon.type === "percent"
+      ? Math.round((subtotalCents * coupon.value) / 100)
+      : coupon.value;
+  const discountCents = Math.min(Math.max(0, raw), subtotalCents);
+  if (discountCents <= 0) {
+    return { ok: false, error: "That promo code gives no discount on this order" };
+  }
+
+  return {
+    ok: true,
+    code: coupon.code,
+    discountCents,
+    label: couponLabel(coupon.type, coupon.value),
+  };
 }
 
 // ─── Cart ────────────────────────────────────────────────────────────────────
@@ -749,6 +1015,7 @@ export async function placeOrder(
   subtotal: number,
   shipping: number,
   userId?: string,
+  couponCode?: string,
 ): Promise<OrderConfirmation> {
   // ── Server-side validation ────────────────────────────────────────────────
   const { fullName, email, address, city, zip } = input;
@@ -771,6 +1038,7 @@ export async function placeOrder(
   for (const item of items) {
     const product = await getProduct(item.product.id);
     if (!product) throw new Error(`Product not found: ${item.product.id}`);
+    if (product.stock <= 0) throw new Error(`${product.name} is out of stock`);
     const qty = Math.max(1, Math.min(Math.floor(item.quantity), product.stock));
     authoritative_subtotal += product.price * qty;
     resolvedItems.push({
@@ -781,47 +1049,106 @@ export async function placeOrder(
     });
   }
 
-  // ── Recompute shipping and tax server-side ────────────────────────────────
+  const subtotalCents = Math.round(authoritative_subtotal * 100);
+
+  // ── Apply the promo code server-side ──────────────────────────────────────
+  let discountCents = 0;
+  let appliedCode: string | null = null;
+  if (couponCode?.trim()) {
+    const check = await validateCoupon(couponCode, subtotalCents);
+    if (!check.ok) throw new Error(check.error);
+    discountCents = check.discountCents;
+    appliedCode = check.code;
+  }
+
+  // ── Recompute shipping and tax on the discounted subtotal ─────────────────
   const TAX_RATE_SERVER = 0.08;
   const FREE_SHIPPING_THRESHOLD_SERVER = 100;
   const FLAT_SHIPPING_SERVER = 12;
 
+  const discountedSubtotal = (subtotalCents - discountCents) / 100;
   const authShipping =
-    authoritative_subtotal >= FREE_SHIPPING_THRESHOLD_SERVER ? 0 : FLAT_SHIPPING_SERVER;
-  const authTax = parseFloat((authoritative_subtotal * TAX_RATE_SERVER).toFixed(2));
-  const authTotal = parseFloat((authoritative_subtotal + authShipping + authTax).toFixed(2));
+    discountedSubtotal >= FREE_SHIPPING_THRESHOLD_SERVER ? 0 : FLAT_SHIPPING_SERVER;
+  const authTax = parseFloat((discountedSubtotal * TAX_RATE_SERVER).toFixed(2));
+  const authTotal = parseFloat((discountedSubtotal + authShipping + authTax).toFixed(2));
+
+  // ── Reserve inventory atomically before writing the order ─────────────────
+  // The conditional UPDATE means two concurrent checkouts can never drive
+  // stock below zero: the loser sees `changes === 0` and we release the
+  // reservations already made by this request.
+  const reserved: { id: string; name: string; quantity: number }[] = [];
+  for (const item of resolvedItems) {
+    const result = await backend.run(
+      "UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?",
+      [item.quantity, item.id, item.quantity],
+    );
+    if (result.changes === 0) {
+      for (const done of reserved) {
+        await backend.run("UPDATE products SET stock = stock + ? WHERE id = ?", [
+          done.quantity,
+          done.id,
+        ]);
+      }
+      throw new Error(`Sorry, ${item.name} just sold out. Please review your cart.`);
+    }
+    reserved.push({ id: item.id, name: item.name, quantity: item.quantity });
+  }
 
   const orderNumber = `NOVA-${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 1000)}`;
 
-  const info = await backend.run(
-    `INSERT INTO orders (session_id, user_id, order_number, full_name, email, address, city, zip,
-      subtotal_cents, shipping_cents, tax_cents, total_cents, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
-    [
-      sessionId,
-      userId ?? null,
-      orderNumber,
-      input.fullName.trim(),
-      input.email.trim(),
-      input.address.trim(),
-      input.city.trim(),
-      input.zip.trim(),
-      Math.round(authoritative_subtotal * 100),
-      Math.round(authShipping * 100),
-      Math.round(authTax * 100),
-      Math.round(authTotal * 100),
-    ],
-  );
-  const orderId = info.lastInsertRowid;
+  let orderId: number;
+  try {
+    const info = await backend.run(
+      `INSERT INTO orders (session_id, user_id, order_number, full_name, email, address, city, zip,
+        subtotal_cents, discount_cents, shipping_cents, tax_cents, total_cents, coupon_code, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
+      [
+        sessionId,
+        userId ?? null,
+        orderNumber,
+        input.fullName.trim(),
+        input.email.trim(),
+        input.address.trim(),
+        input.city.trim(),
+        input.zip.trim(),
+        subtotalCents,
+        discountCents,
+        Math.round(authShipping * 100),
+        Math.round(authTax * 100),
+        Math.round(authTotal * 100),
+        appliedCode,
+      ],
+    );
+    orderId = info.lastInsertRowid;
+  } catch (error) {
+    // Order insert failed — put the reserved stock back.
+    for (const done of reserved) {
+      await backend.run("UPDATE products SET stock = stock + ? WHERE id = ?", [
+        done.quantity,
+        done.id,
+      ]);
+    }
+    throw error;
+  }
 
   let itemCount = 0;
-  await backend.batch(resolvedItems.map((item) => {
+  const orderStatements = resolvedItems.map((item) => {
     itemCount += item.quantity;
     return {
       sql: `INSERT INTO order_items (order_id, product_id, product_name, price_cents, quantity) VALUES (?, ?, ?, ?, ?)`,
       params: [orderId, item.id, item.name, item.priceCents, item.quantity],
     };
+  });
+  // Ledger entry per reserved line, so stock changes are auditable.
+  const movementStatements = reserved.map((item) => ({
+    sql: `INSERT INTO inventory_movements (product_id, delta, reason, order_id) VALUES (?, ?, 'order', ?)`,
+    params: [item.id, -item.quantity, orderId] as SqlParam[],
   }));
+  await backend.batch([...orderStatements, ...movementStatements]);
+
+  if (appliedCode) {
+    await backend.run("UPDATE coupons SET uses = uses + 1 WHERE code = ?", [appliedCode]);
+  }
 
   if (sessionId) await backend.run("DELETE FROM cart_items WHERE session_id = ?", [sessionId]);
 
@@ -830,6 +1157,8 @@ export async function placeOrder(
     fullName: input.fullName.trim(),
     email: input.email.trim(),
     subtotal: authoritative_subtotal,
+    discount: discountCents / 100,
+    couponCode: appliedCode ?? undefined,
     shipping: authShipping,
     tax: authTax,
     total: authTotal,
@@ -844,6 +1173,28 @@ export async function getOrdersByUser(userId: string): Promise<AdminOrderRow[]> 
      FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id
      WHERE o.user_id = ? GROUP BY o.id ORDER BY o.created_at DESC`,
     [userId],
+  );
+}
+
+/**
+ * Guest order tracking: an order number plus the email used at checkout.
+ * Both values must match, so a number alone does not leak an order.
+ */
+export async function lookupOrder(
+  orderNumber: string,
+  email: string,
+): Promise<AdminOrderRow | undefined> {
+  const number = orderNumber.trim().toUpperCase();
+  const mail = email.trim().toLowerCase();
+  if (!number || !mail) return undefined;
+
+  const backend = await getBackend();
+  return backend.get<AdminOrderRow>(
+    `SELECT o.*, GROUP_CONCAT(oi.product_name || ' ×' || oi.quantity, ', ') AS items_summary
+     FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id
+     WHERE UPPER(o.order_number) = ? AND LOWER(o.email) = ?
+     GROUP BY o.id`,
+    [number, mail],
   );
 }
 

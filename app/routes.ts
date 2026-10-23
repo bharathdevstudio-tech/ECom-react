@@ -14,12 +14,14 @@ export default [
   route("login", "routes/login.tsx"),
   route("register", "routes/register.tsx"),
   route("my-orders", "routes/my-orders.tsx"),
+  route("order-lookup", "routes/order-lookup.tsx"),
 
   // Admin (layout + nested)
   layout("routes/admin.tsx", [
     route("admin", "routes/admin._index.tsx"),
     route("admin/products", "routes/admin.products.tsx"),
     route("admin/orders", "routes/admin.orders.tsx"),
+    route("admin/coupons", "routes/admin.coupons.tsx"),
   ]),
 
   // Customer API
@@ -30,6 +32,8 @@ export default [
   route("api/recent-views", "routes/api.recent-views.tsx"),
   route("api/recent-views/:productId", "routes/api.recent-views.$productId.tsx"),
   route("api/orders", "routes/api.orders.tsx"),
+  route("api/orders/lookup", "routes/api.orders.lookup.tsx"),
+  route("api/coupons/validate", "routes/api.coupons.validate.tsx"),
   route("api/my-orders", "routes/api.my-orders.tsx"),
 
   // Auth API
@@ -43,6 +47,7 @@ export default [
   route("api/admin/products", "routes/api.admin.products.tsx"),
   route("api/admin/products/:id", "routes/api.admin.products.$id.tsx"),
   route("api/admin/orders", "routes/api.admin.orders.tsx"),
+  route("api/admin/coupons", "routes/api.admin.coupons.tsx"),
 
   // 404 — must be last
   route("*", "routes/404.tsx"),

@@ -1,7 +1,15 @@
-import { Link } from "react-router";
-import { data } from "react-router";
+import { Form, Link, data, redirect, useActionData, useNavigation } from "react-router";
 import type { Route } from "./+types/product";
-import { getAllProducts, getProduct, getProductFeatures, getReviews } from "@/server/db";
+import {
+  addReview,
+  getAllProducts,
+  getProduct,
+  getProductFeatures,
+  getReviews,
+  getUserFromSession,
+  getUserReview,
+} from "@/server/db";
+import { getSessionId } from "@/server/session";
 import { formatPrice, getDiscountPercent } from "@/lib/format";
 import AddToCartButton from "@/components/product/AddToCartButton";
 import RecordView from "@/components/product/RecordView";
@@ -61,7 +69,7 @@ const categorySpecs: Record<string, [string, string][]> = {
   ],
 };
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
   const product = await getProduct(params.id);
   if (!product) throw data(null, { status: 404 });
   const features = await getProductFeatures(params.id);
@@ -69,11 +77,43 @@ export async function loader({ params }: Route.LoaderArgs) {
   const related = (await getAllProducts())
     .filter((p) => p.category === product.category && p.id !== product.id)
     .slice(0, 4);
-  return { product, features, reviews, related };
+
+  // `getSessionId` may mint a throwaway id for anonymous visitors; that is
+  // fine because no user will be found for it and no cookie is written.
+  const sessionId = await getSessionId(request);
+  const user = await getUserFromSession(sessionId);
+  const userReview = user ? await getUserReview(params.id, user.id) : undefined;
+
+  return { product, features, reviews, related, user, userReview };
+}
+
+export async function action({ request, params }: Route.ActionArgs) {
+  const sessionId = await getSessionId(request);
+  const user = await getUserFromSession(sessionId);
+  if (!user) {
+    return { error: "Please sign in to write a review." };
+  }
+
+  const form = await request.formData();
+  try {
+    await addReview(params.id, user.id, user.name, {
+      rating: Number(form.get("rating") ?? 0),
+      title: String(form.get("title") ?? ""),
+      body: String(form.get("body") ?? ""),
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save your review." };
+  }
+
+  // Redirect after a successful POST so a refresh cannot resubmit the form.
+  return redirect(`/products/${params.id}#reviews`);
 }
 
 export default function ProductPage({ loaderData }: Route.ComponentProps) {
-  const { product, features, reviews, related } = loaderData;
+  const { product, features, reviews, related, user, userReview } = loaderData;
+  const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const submitting = navigation.state === "submitting";
   const discount = getDiscountPercent(product);
   const specs = categorySpecs[product.category] ?? [];
 
@@ -250,25 +290,115 @@ export default function ProductPage({ loaderData }: Route.ComponentProps) {
         </div>
 
         {/* ── Reviews ─────────────────────────────────────── */}
-        {reviews.length > 0 && (
-          <section aria-labelledby="reviews-heading" className="mt-16 sm:mt-20">
-            <div className="mb-6">
-              <p className="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">
-                Social proof
-              </p>
-              <h2
-                id="reviews-heading"
-                className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50"
-              >
-                Customer reviews
-              </h2>
-            </div>
+        <section id="reviews" aria-labelledby="reviews-heading" className="mt-16 scroll-mt-24 sm:mt-20">
+          <div className="mb-6">
+            <p className="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">
+              Social proof
+            </p>
+            <h2
+              id="reviews-heading"
+              className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50"
+            >
+              Customer reviews
+            </h2>
+          </div>
 
-            {/* Horizontal scroll on mobile, grid on sm+ */}
+          {/* Write a review */}
+          <div className="mb-8 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-6">
+            {!user ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                Bought this product?{" "}
+                <Link
+                  to={`/login?redirect=/products/${product.id}`}
+                  className="font-semibold text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+                >
+                  Sign in
+                </Link>{" "}
+                to write a review.
+              </p>
+            ) : userReview ? (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                  Thanks for your review!
+                </span>
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  You rated this {userReview.rating}/5 on {userReview.date}.
+                </span>
+              </div>
+            ) : (
+              <Form method="post" className="flex flex-col gap-4">
+                <h3 className="font-bold text-zinc-900 dark:text-zinc-50">Write a review</h3>
+
+                {actionData?.error && (
+                  <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/50 dark:bg-red-950/40 dark:text-red-400">
+                    {actionData.error}
+                  </p>
+                )}
+
+                <div className="grid gap-4 sm:grid-cols-[150px_1fr]">
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-medium text-zinc-600 dark:text-zinc-300">
+                      Rating
+                    </span>
+                    <select
+                      name="rating"
+                      defaultValue="5"
+                      className="h-11 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                    >
+                      {[5, 4, 3, 2, 1].map((n) => (
+                        <option key={n} value={n}>
+                          {"★".repeat(n)}{"☆".repeat(5 - n)} ({n}/5)
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-medium text-zinc-600 dark:text-zinc-300">
+                      Title
+                    </span>
+                    <input
+                      name="title"
+                      required
+                      minLength={3}
+                      maxLength={120}
+                      placeholder="Sums up your experience"
+                      className="h-11 w-full rounded-xl border border-zinc-300 bg-white px-4 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:placeholder:text-zinc-500"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-zinc-600 dark:text-zinc-300">
+                    Review
+                  </span>
+                  <textarea
+                    name="body"
+                    required
+                    minLength={10}
+                    maxLength={2000}
+                    rows={4}
+                    placeholder="What did you like or dislike?"
+                    className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:placeholder:text-zinc-500"
+                  />
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="h-11 w-full rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 px-6 text-sm font-semibold text-white shadow-lg shadow-violet-600/20 transition-all hover:shadow-xl disabled:cursor-wait disabled:opacity-60 sm:w-auto sm:self-start"
+                >
+                  {submitting ? "Posting…" : "Post review"}
+                </button>
+              </Form>
+            )}
+          </div>
+
+          {reviews.length > 0 ? (
             <div className="flex gap-4 overflow-x-auto pb-2 no-scrollbar sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0 lg:grid-cols-3">
               {reviews.map((review) => (
                 <figure
-                  key={`${review.author}-${review.date}`}
+                  key={`${review.userId ?? review.author}-${review.date}`}
                   className="flex w-72 shrink-0 flex-col gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:w-auto sm:rounded-3xl sm:p-6"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -299,8 +429,12 @@ export default function ProductPage({ loaderData }: Route.ComponentProps) {
                 </figure>
               ))}
             </div>
-          </section>
-        )}
+          ) : (
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              No reviews yet — be the first to share your thoughts.
+            </p>
+          )}
+        </section>
 
         {/* ── Related products ─────────────────────────────── */}
         {related.length > 0 && (
